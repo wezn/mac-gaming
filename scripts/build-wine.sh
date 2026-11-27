@@ -93,7 +93,7 @@ arch -x86_64 ../src/wine/configure \
   --disable-tests \
   --enable-archs=i386,x86_64 \
   --with-mingw \
-  --with-coreaudio --with-freetype --with-opencl --with-opengl --with-vulkan \
+  --with-coreaudio --with-freetype --with-opencl --with-vulkan \
   --with-pthread --with-unwind \
   --without-gnutls --without-gstreamer --without-sdl \
   --without-x --without-wayland --without-alsa --without-pulse --without-oss \
