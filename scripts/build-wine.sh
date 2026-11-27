@@ -88,6 +88,8 @@ export LDFLAGS="-L$DEPS/lib -Wl,-headerpad_max_install_names -Wl,-rpath,@loader_
 
 echo "==> Configuring Wine (WoW64)"
 rm -rf obj && mkdir obj && cd obj
+# tools/sfnt2fon runs during the build and resolves freetype through @loader_path/../../, which is obj/.
+ln -s ../deps/lib/libfreetype.6.dylib .
 arch -x86_64 ../src/wine/configure \
   --prefix="" \
   --disable-tests \
