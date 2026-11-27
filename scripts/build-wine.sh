@@ -119,10 +119,10 @@ tar -xzf "$NETTLE_TAR" -C "$WORK/src/nettle" --strip-components=1
 # Pass NETTLE_LIBS/HOGWEED_LIBS explicitly: without them GnuTLS finds nettle with AC_CHECK_LIB,
 # leaves NETTLE_LIBS empty, its nettle feature probes (streebog, SIV-GCM) then link without
 # -lnettle and fail, and its own GOST fallback clashes with nettle's headers.
+# No spaces in them: GnuTLS tests `test x$NETTLE_LIBS != x` unquoted. -L and -I come from
+# LDFLAGS/CPPFLAGS.
 (cd "$WORK/src/gnutls/gnutls" && arch -x86_64 ./configure --host=$TLS_HOST --build=$TLS_HOST --prefix="$DEPS" \
-   GMP_CFLAGS="-I$DEPS/include" GMP_LIBS="-L$DEPS/lib -lgmp" \
-   NETTLE_CFLAGS="-I$DEPS/include" NETTLE_LIBS="-L$DEPS/lib -lnettle" \
-   HOGWEED_CFLAGS="-I$DEPS/include" HOGWEED_LIBS="-L$DEPS/lib -lhogweed" \
+   GMP_LIBS=-lgmp NETTLE_LIBS=-lnettle HOGWEED_LIBS=-lhogweed \
    --enable-shared --disable-static --disable-doc --disable-manpages --disable-tools \
    --disable-cxx --disable-tests --disable-nls --disable-libdane \
    --without-p11-kit --without-tpm --without-tpm2 --without-idn \
