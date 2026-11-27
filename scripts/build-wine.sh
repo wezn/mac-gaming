@@ -29,8 +29,15 @@ MVK_SHA256=f95765a6229cb7b915990a2890ce12ebe36a730b021545d3d52ae69ce4c4024e
 [[ -x "$BREW" ]] || { echo "arm64 Homebrew not found at /opt/homebrew" >&2; exit 1; }
 arch -x86_64 /usr/bin/true || { echo "Rosetta 2 is not installed" >&2; exit 1; }
 
-echo "==> Installing build tools (arm64 Homebrew)"
-"$BREW" install --quiet bison flex gettext mingw-w64 pkgconf cmake
+echo "==> Installing missing build tools (arm64 Homebrew)"
+# This is the runner owner's personal Homebrew: install what is missing, upgrade nothing.
+export HOMEBREW_NO_AUTO_UPDATE=1 HOMEBREW_NO_INSTALL_UPGRADE=1 \
+  HOMEBREW_NO_INSTALLED_DEPENDENTS_CHECK=1 HOMEBREW_NO_INSTALL_CLEANUP=1
+missing=()
+for f in bison flex gettext mingw-w64 pkgconf cmake; do
+  "$BREW" list --formula --versions "$f" >/dev/null || missing+=("$f")
+done
+if (( ${#missing[@]} )); then "$BREW" install --quiet "${missing[@]}"; fi
 
 export PATH="/opt/homebrew/opt/bison/bin:/opt/homebrew/opt/flex/bin:/opt/homebrew/bin:$PATH"
 export MACOSX_DEPLOYMENT_TARGET=13.0
