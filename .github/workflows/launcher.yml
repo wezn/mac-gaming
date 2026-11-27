@@ -263,31 +263,51 @@ jobs:
         if: steps.wine.outputs.found == 'true'
         run: |
           # Battle.net and Steam need TLS through WinHTTP/WinINet, which Wine implements on top of
-          # GnuTLS. Without it they say "no internet". Any HTTP status means the handshake worked.
+          # GnuTLS. Without it they say "no internet". Each URL is fetched natively with curl first:
+          # a URL the runner itself cannot reach (blocked datacenter IPs) is not held against Wine.
+          # Any HTTP status means the TLS handshake worked.
           mg=launcher/.build/release/mg
+          urls=(https://store.steampowered.com/ https://www.battle.net/ https://us.battle.net/ https://www.blizzard.com/ https://example.com/)
           js="$RUNNER_TEMP/https.js"
-          cat > "$js" <<'JS'
-          var urls = ["https://www.battle.net/", "https://store.steampowered.com/"];
-          var failed = 0;
+          {
+            echo 'var urls = WScript.Arguments, failed = 0;'
+            cat <<'JS'
           for (var i = 0; i < urls.length; i++) {
             try {
               var r = new ActiveXObject("WinHttp.WinHttpRequest.5.1");
-              r.Open("GET", urls[i], false);
+              r.SetTimeouts(15000, 15000, 15000, 30000);
+              r.Open("GET", urls(i), false);
               r.Send();
-              WScript.Echo("mg-https-ok " + r.Status + " " + urls[i]);
+              WScript.Echo("mg-https-ok " + r.Status + " " + urls(i));
             } catch (e) {
-              WScript.Echo("mg-https-fail " + urls[i] + ": " + e.message);
+              WScript.Echo("mg-https-fail " + urls(i) + " 0x" + (e.number >>> 0).toString(16) + " " + e.message);
               failed++;
             }
           }
           WScript.Quit(failed);
           JS
+          } > "$js"
           winpath="Z:${js//\//\\}"
           code=0
-          $mg run --bottle test --backend wined3d --debug err+all,+winediag cscript.exe //nologo "$winpath" || code=$?
-          $mg logs --last
-          if (( code != 0 )) || ! $mg logs --last | grep -q 'mg-https-ok'; then
-            echo "::error::HTTPS inside Wine failed (cscript exit $code); see the log above (look for libgnutls / schannel)"
+          $mg run --bottle test --backend wined3d --debug err+all,+winediag cscript.exe //nologo "$winpath" "${urls[@]}" || code=$?
+          echo "cscript exit code: $code ($code URL(s) failed inside Wine)"
+          log=$($mg logs --last)
+          grep -E '^mg-https-|err:' <<<"$log" || true
+          bad=0
+          for u in "${urls[@]}"; do
+            native=$(curl -sS -o /dev/null -m 20 -w '%{http_code}' "$u" 2>&1 || true)
+            if grep -qF "mg-https-ok" <<<"$(grep -F " $u" <<<"$log")"; then
+              echo "ok: $u (native curl: $native)"
+            elif [[ "$native" =~ ^[1-5][0-9][0-9]$ && "$native" != 000 ]]; then
+              echo "::error::$u works natively (HTTP $native) but not inside Wine"; bad=1
+            else
+              echo "::warning::$u fails inside Wine, but also natively ($native); not counted"
+            fi
+          done
+          if (( bad )); then
+            echo "== retrying with +secur32,+winhttp tracing"
+            $mg run --bottle test --backend wined3d --debug +secur32,+winhttp,+crypt cscript.exe //nologo "$winpath" "${urls[@]}" || true
+            $mg logs --last | grep -E 'secur32|schannel|gnutls|winhttp:(netconn|ensure_cred|read_reply|send_request)|crypt:.*(Chain|Error|error)|^mg-https' | tail -150
             exit 1
           fi
 
