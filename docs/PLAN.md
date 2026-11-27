@@ -58,8 +58,10 @@ pick carefully.
 | Component | License | OK to sell? |
 |---|---|---|
 | Wine / CrossOver source | LGPL-2.1+ | Yes. You must publish the source of any changes you make to Wine (CodeWeavers does this) |
-| DXMT | MIT (check the LICENSE file at the version you ship) | Yes, with attribution |
-| DXVK | zlib | Yes |
+| DXMT (v0.80, `dxmt-*.tar.xz`) | MIT (checked at v0.80; LICENSE ships in the artifact) | Yes, with attribution |
+| LLVM 15 (statically linked into DXMT's `winemetal.so`) | Apache-2.0 with LLVM exception | Yes. The LLVM exception waives attribution for compiled binaries; crediting it anyway is good form |
+| mingw-w64 runtime (statically linked into DXMT/DXVK DLLs: libstdc++, libgcc, winpthreads) | GPL-3.0 + GCC Runtime Library Exception; winpthreads MIT/BSD-style | Yes. The exception permits proprietary distribution; keep winpthreads' notice |
+| DXVK-macOS (Gcenx fork, v1.10.3-20230507-repack, `dxvk-macos-*.tar.xz`) | zlib (LICENSE ships in the artifact) | Yes |
 | MoltenVK | Apache-2.0 | Yes, with attribution |
 | D3DMetal (Apple GPTK) | Apple license, **non-commercial redistribution only** | **No, not without an agreement with Apple.** Options: ask Apple for a commercial license, or have users install GPTK themselves and point the app at it |
 

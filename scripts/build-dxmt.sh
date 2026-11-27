@@ -5,7 +5,7 @@
 #   dxmt/x86_64-windows/{d3d11,dxgi,d3d10core,winemetal}.dll   (64-bit PE, Wine builtin-marked)
 #   dxmt/i386-windows/{d3d11,dxgi,d3d10core,winemetal}.dll     (32-bit PE, Wine builtin-marked)
 #   dxmt/x86_64-unix/winemetal.so                              (x86_64 Mach-O unixlib)
-#   dxmt/LICENSE, dxmt/VERSION
+#   dxmt/LICENSE, dxmt/VERSION, dxmt/dxmt.conf
 # See docs/ARTIFACTS.md for how to install it.
 #
 # Follows DXMT's docs/DEVELOPMENT.md "Cross Build" (meson + mingw-w64 + LLVM 15 + Xcode
@@ -99,6 +99,7 @@ done
 cp "$WORK/dxmt-install/x86_64-unix/winemetal.so" "$PKG/x86_64-unix/"
 file "$PKG/x86_64-unix/winemetal.so" | grep -q 'x86_64' || { echo "winemetal.so is not x86_64" >&2; exit 1; }
 cp LICENSE "$PKG/LICENSE"
+cp dxmt.conf "$PKG/dxmt.conf"
 printf 'DXMT %s (%s)\nhttps://github.com/3Shain/dxmt\nBuilt against Wine: %s\n' \
   "$DXMT_TAG" "$DXMT_COMMIT" "$("$WINE_DIR/bin/winebuild" --version 2>/dev/null | head -1 || echo unknown)" \
   > "$PKG/VERSION"

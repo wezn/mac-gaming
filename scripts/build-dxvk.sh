@@ -4,6 +4,7 @@
 # Upstream DXVK 2.x needs Vulkan features MoltenVK lacks, so we use the 1.10.x macOS fork
 # (https://github.com/Gcenx/DXVK-macOS, branch 1.10.x), the one Whisky and other macOS Wine
 # wrappers ship. It includes the async pipeline-compile patch (DXVK_ASYNC=1).
+# patches/dxvk-macos/*.patch are applied on top (build fixes for current mingw-w64).
 #
 # Produces build/dist/dxvk-macos-<version>.tar.xz:
 #   dxvk/x64/{d3d9,d3d10core,d3d11,dxgi}.dll   (64-bit PE)
@@ -53,6 +54,10 @@ git -c advice.detachedHead=false clone --quiet --depth 1 --branch "$DXVK_TAG" \
   https://github.com/Gcenx/DXVK-macOS.git "$SRC"
 got="$(git -C "$SRC" rev-parse HEAD)"
 [[ "$got" == "$DXVK_COMMIT" ]] || { echo "DXVK $DXVK_TAG is $got, expected $DXVK_COMMIT" >&2; exit 1; }
+for p in "$ROOT"/patches/dxvk-macos/*.patch; do
+  echo "==> Applying $(basename "$p")"
+  git -C "$SRC" apply --whitespace=nowarn "$p"
+done
 
 PKG="$WORK/dxvk-pkg/dxvk"
 rm -rf "$WORK/dxvk-pkg" && mkdir -p "$PKG"
