@@ -2,6 +2,13 @@ import Foundation
 import XCTest
 @testable import MGCore
 
+/// Physical path (`/private/var/...` on macOS), matching what `pwd` prints in a child process.
+func realPath(_ url: URL) -> String {
+    guard let p = realpath(url.path, nil) else { return url.path }
+    defer { free(p) }
+    return String(cString: p)
+}
+
 enum Fixture {
     static func url(_ name: String) -> URL {
         Bundle.module.url(forResource: "Fixtures", withExtension: nil)!.appendingPathComponent(name)

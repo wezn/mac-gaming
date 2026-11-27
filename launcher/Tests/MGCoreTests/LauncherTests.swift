@@ -115,7 +115,7 @@ final class LauncherTests: XCTestCase {
         XCTAssertTrue(log.contains("# backend: dxvk"), log)
         XCTAssertTrue(log.contains("wine \(exe.path) a b"), log)
         XCTAssertTrue(log.contains("WINEPREFIX=\(bottle.prefix.path)"), log)
-        XCTAssertTrue(log.contains("PWD=\(exe.deletingLastPathComponent().path)"), log)
+        XCTAssertTrue(log.contains("PWD=\(realPath(exe.deletingLastPathComponent()))"), log)
         XCTAssertEqual(LogStore(paths: sb.paths).list(bottle: "b").first?.url, p.logFile)
     }
 
@@ -165,12 +165,11 @@ final class SubprocessTests: XCTestCase {
 
     func testWorkingDirectoryIsRestored() throws {
         let before = FileManager.default.currentDirectoryPath
-        let (_, out) = try Subprocess.capture(URL(fileURLWithPath: "/bin/pwd"), [], environment: [:])
-        _ = out
         let sb = try Sandbox()
         let f = sb.root.appendingPathComponent("pwd.log")
         _ = try Subprocess.run(URL(fileURLWithPath: "/bin/pwd"), ["-P"], environment: [:], workingDirectory: sb.root, output: .file(f))
-        XCTAssertEqual(sb.read(f).trimmingCharacters(in: .newlines), sb.root.resolvingSymlinksInPath().path)
+        let printed = URL(fileURLWithPath: sb.read(f).trimmingCharacters(in: .newlines))
+        XCTAssertEqual(realPath(printed), realPath(sb.root))
         XCTAssertEqual(FileManager.default.currentDirectoryPath, before)
     }
 

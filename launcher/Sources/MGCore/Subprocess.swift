@@ -59,12 +59,15 @@ public enum Subprocess {
         }
         if tee { posix_spawn_file_actions_addclose(&actions, pipeFDs[0]) }
 
-        // posix_spawn has no portable chdir action; switch ours around the spawn instead.
-        let previousDir = FileManager.default.currentDirectoryPath
-        if let wd = workingDirectory, !FileManager.default.changeCurrentDirectoryPath(wd.path) {
-            throw MGError.io("cannot enter \(wd.path)")
+        // Per-spawn chdir (macOS 10.15+, glibc 2.29+): changing mg's own cwd would race in a
+        // multi-threaded front end.
+        if let wd = workingDirectory {
+            var isDir: ObjCBool = false
+            guard FileManager.default.fileExists(atPath: wd.path, isDirectory: &isDir), isDir.boolValue else {
+                throw MGError.io("cannot enter \(wd.path)")
+            }
+            posix_spawn_file_actions_addchdir_np(&actions, wd.path)
         }
-        defer { if workingDirectory != nil { _ = FileManager.default.changeCurrentDirectoryPath(previousDir) } }
 
         let argv = [executable.path] + arguments
         let envp = environment.map { "\($0.key)=\($0.value)" }.sorted()
