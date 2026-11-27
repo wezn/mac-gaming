@@ -56,6 +56,7 @@ final class Sandbox {
         try write("bin/wine", wine, executable: true, in: dir)
         try write("bin/wineserver", "#!/bin/sh\nexit 0\n", executable: true, in: dir)
         try write("lib/libMoltenVK.dylib", in: dir)
+        try write("lib/libgnutls.30.dylib", in: dir)
         try write("lib/wine/x86_64-windows/d3d11.dll", "wine-builtin-d3d11", in: dir)
         try write("lib/wine/i386-windows/d3d11.dll", "wine-builtin32-d3d11", in: dir)
         try write("lib/wine/x86_64-windows/wined3d.dll", "wine-builtin-wined3d", in: dir)

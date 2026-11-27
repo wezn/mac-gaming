@@ -223,6 +223,19 @@ final class DoctorAndLogsTests: XCTestCase {
         XCTAssertTrue(checks.contains { $0.status == .ok && $0.title.contains("DXMT 0.61") && $0.detail.hasPrefix("winemetal integrated") })
         XCTAssertFalse(checks.contains { $0.title.contains("DXMT built for another Wine") })
         XCTAssertTrue(checks.contains { $0.status == .ok && $0.title.contains("Wine crossover-26.3.0-wow64") })
+        XCTAssertFalse(checks.contains { $0.title.contains("no GnuTLS") })
+    }
+
+    func testDoctorFlagsWineWithoutGnuTLS() throws {
+        let sb = try Sandbox()
+        let a = try sb.makeArchives()
+        let r = try RuntimeStore(paths: sb.paths).install(sources: [a.wine])
+        let rt = try RuntimeStore(paths: sb.paths).get(r.runtime)
+        try FileManager.default.removeItem(at: rt.wineRoot.appendingPathComponent("lib/libgnutls.30.dylib"))
+        var d = Doctor(paths: sb.paths, environment: [:])
+        d.rosettaInstalled = { nil }
+        let checks = d.run()
+        XCTAssertTrue(checks.contains { $0.status == .warning && $0.title.hasSuffix("no GnuTLS") && $0.detail.contains("Battle.net") }, "\(checks)")
     }
 
     func testDoctorFlagsDXMTForAnotherWineAndStaleOverlay() throws {

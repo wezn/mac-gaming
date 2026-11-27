@@ -25,7 +25,7 @@ jobs:
       run:
         working-directory: launcher
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
@@ -33,7 +33,7 @@ jobs:
         run: swift --version
 
       - name: Cache SwiftPM
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: launcher/.build
           key: spm-${{ runner.os }}-${{ hashFiles('launcher/Package.resolved') }}
@@ -74,7 +74,7 @@ jobs:
           echo "dir=$out" >> "$GITHUB_OUTPUT"
 
       - name: Upload mg binary
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: mg-macos-arm64
           path: ${{ steps.package.outputs.dir }}
@@ -88,12 +88,12 @@ jobs:
     runs-on: macos-15
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
       - name: Cache SwiftPM
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: launcher/.build
           key: spm-app-${{ runner.os }}-${{ hashFiles('launcher/Package.resolved') }}
@@ -176,7 +176,7 @@ jobs:
         run: ditto -c -k --keepParent MacGaming.app MacGaming.zip
 
       - name: Upload the app
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: MacGaming-app
           path: launcher/build/MacGaming.zip
@@ -184,7 +184,7 @@ jobs:
 
       - name: Upload screenshots
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: app-screenshots
           path: ${{ runner.temp }}/screenshots
@@ -204,7 +204,7 @@ jobs:
       run:
         shell: bash # -eo pipefail
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
@@ -215,7 +215,7 @@ jobs:
         run: arch -x86_64 /usr/bin/true || sudo softwareupdate --install-rosetta --agree-to-license
 
       - name: Cache SwiftPM
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: launcher/.build
           key: spm-${{ runner.os }}-${{ hashFiles('launcher/Package.resolved') }}
@@ -258,6 +258,38 @@ jobs:
           $mg run --bottle test --backend wined3d cmd.exe /c echo mg-smoke-ok
           $mg logs --last
           $mg logs --last | grep -q mg-smoke-ok
+
+      - name: HTTPS from inside Wine (schannel / GnuTLS)
+        if: steps.wine.outputs.found == 'true'
+        run: |
+          # Battle.net and Steam need TLS through WinHTTP/WinINet, which Wine implements on top of
+          # GnuTLS. Without it they say "no internet". Any HTTP status means the handshake worked.
+          mg=launcher/.build/release/mg
+          js="$RUNNER_TEMP/https.js"
+          cat > "$js" <<'JS'
+          var urls = ["https://www.battle.net/", "https://store.steampowered.com/"];
+          var failed = 0;
+          for (var i = 0; i < urls.length; i++) {
+            try {
+              var r = new ActiveXObject("WinHttp.WinHttpRequest.5.1");
+              r.Open("GET", urls[i], false);
+              r.Send();
+              WScript.Echo("mg-https-ok " + r.Status + " " + urls[i]);
+            } catch (e) {
+              WScript.Echo("mg-https-fail " + urls[i] + ": " + e.message);
+              failed++;
+            }
+          }
+          WScript.Quit(failed);
+          JS
+          winpath="Z:${js//\//\\}"
+          code=0
+          $mg run --bottle test --backend wined3d --debug err+all,+winediag cscript.exe //nologo "$winpath" || code=$?
+          $mg logs --last
+          if (( code != 0 )) || ! $mg logs --last | grep -q 'mg-https-ok'; then
+            echo "::error::HTTPS inside Wine failed (cscript exit $code); see the log above (look for libgnutls / schannel)"
+            exit 1
+          fi
 
       - name: Run notepad.exe headlessly
         if: steps.wine.outputs.found == 'true'
@@ -437,7 +469,7 @@ jobs:
 
       - name: Upload logs
         if: always() && steps.wine.outputs.found == 'true'
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: smoke-logs
           path: |

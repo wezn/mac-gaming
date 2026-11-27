@@ -121,6 +121,11 @@ public struct Doctor {
                 if !FileManager.default.fileExists(atPath: mvk.path) {
                     out.append(.init(.warning, "runtime \(rt.name): MoltenVK missing", "\(mvk.path) not found; DXVK and Vulkan games will fail"))
                 }
+                let tls = rt.wineRoot.appendingPathComponent("lib/libgnutls.30.dylib")
+                if !FileManager.default.fileExists(atPath: tls.path) {
+                    out.append(.init(.warning, "runtime \(rt.name): no GnuTLS",
+                                      "\(tls.path) not found; HTTPS inside Wine fails, so Battle.net and Steam report no internet. Install a newer Wine build"))
+                }
             } else {
                 out.append(.init(.error, "runtime \(rt.name)\(tag): no Wine", "\(rt.wineBinary.path) missing or not executable"))
             }
