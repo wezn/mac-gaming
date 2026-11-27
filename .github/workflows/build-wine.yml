@@ -1,0 +1,23 @@
+name: Build Wine
+
+on:
+  workflow_dispatch:
+    inputs:
+      crossover_version:
+        description: CrossOver source version (see codeweavers.com/crossover/source)
+        required: true
+        default: "26.0.0"
+
+jobs:
+  build:
+    # Self-hosted M4 Max. Keep this repo PRIVATE: on a public repo, fork PRs could run code on your Mac.
+    runs-on: [self-hosted, macOS, ARM64]
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build
+        run: scripts/build-wine.sh "${{ inputs.crossover_version }}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wine-crossover-${{ inputs.crossover_version }}-wow64
+          path: build/dist/*.tar.xz
