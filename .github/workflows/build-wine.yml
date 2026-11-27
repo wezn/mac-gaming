@@ -8,18 +8,42 @@ on:
         required: true
         default: "26.3.0"
 
+# Least privilege: the job only needs to read the repo.
+permissions:
+  contents: read
+
+concurrency:
+  group: build-wine-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   build:
-    # Self-hosted M4 Max. Keep this repo PRIVATE: on a public repo, fork PRs could run code on your Mac.
-    runs-on: [self-hosted, macOS, ARM64]
-    timeout-minutes: 120
+    # GitHub-hosted Apple Silicon VM: free on public repos, and nothing runs on a personal machine.
+    runs-on: macos-15
+    timeout-minutes: 360
     env:
       CX_VERSION: ${{ inputs.crossover_version }}
     steps:
-      - uses: actions/checkout@v4
+      - name: Validate input
+        run: '[[ "$CX_VERSION" =~ ^[0-9]+\.[0-9]+(\.[0-9]+)?$ ]] || { echo "bad version: $CX_VERSION"; exit 1; }'
+
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Ensure Rosetta 2
+        run: arch -x86_64 /usr/bin/true || sudo softwareupdate --install-rosetta --agree-to-license
+
+      - name: Cache downloads
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ~/Library/Caches/mac-gaming
+          key: downloads-${{ env.CX_VERSION }}
+
       - name: Build
         run: scripts/build-wine.sh "$CX_VERSION"
-      - uses: actions/upload-artifact@v4
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: wine-crossover-${{ env.CX_VERSION }}-wow64
           path: build/dist/*.tar.xz

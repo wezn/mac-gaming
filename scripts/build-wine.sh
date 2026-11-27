@@ -30,7 +30,7 @@ MVK_SHA256=f95765a6229cb7b915990a2890ce12ebe36a730b021545d3d52ae69ce4c4024e
 arch -x86_64 /usr/bin/true || { echo "Rosetta 2 is not installed" >&2; exit 1; }
 
 echo "==> Installing missing build tools (arm64 Homebrew)"
-# This is the runner owner's personal Homebrew: install what is missing, upgrade nothing.
+# Install only what is missing and upgrade nothing, so a local Homebrew is left as it was.
 export HOMEBREW_NO_AUTO_UPDATE=1 HOMEBREW_NO_INSTALL_UPGRADE=1 \
   HOMEBREW_NO_INSTALLED_DEPENDENTS_CHECK=1 HOMEBREW_NO_INSTALL_CLEANUP=1
 missing=()
