@@ -28,6 +28,8 @@ public struct Bottle: Equatable, Sendable {
 /// Things mgx has applied to the prefix (so repeat launches skip them).
 struct BottleState: Codable, Equatable {
     var retinaApplied: Bool?
+    /// `HKCU\Control Panel\Desktop\LogPixels` as last written (nil: never written, Wine's 96).
+    var logPixelsApplied: Int?
 }
 
 public struct BottleStore {

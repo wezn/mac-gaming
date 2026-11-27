@@ -145,7 +145,7 @@ What a run sets up:
 | `DYLD_FALLBACK_LIBRARY_PATH` | the runtime's `wine/lib` (bundled MoltenVK and freetype), plus D3DMetal's `external/` when used |
 | `WINEDEBUG=-all` | unless you set it (`--debug +loaddll`) |
 | `MTL_HUD_ENABLED=1` | with `--hud` or a bottle with the HUD on |
-| Retina | written to `HKCU\Software\Wine\Mac Driver\RetinaMode` only when the setting changes |
+| Retina | written to `HKCU\Software\Wine\Mac Driver\RetinaMode` only when the setting changes, together with `HKCU\Control Panel\Desktop\LogPixels` = 192 (on) or 96 (off): Retina mode works in device pixels, so without 200% DPI apps are drawn at half size |
 
 Stray `WINELOADER`, `WINESERVER`, `WINEDLLPATH` and `WINEARCH` from your shell are dropped.
 

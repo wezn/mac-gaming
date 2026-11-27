@@ -141,15 +141,27 @@ public struct Launcher: Sendable {
         if changed > 0 { log("copied \(changed) \(plan.setup.backend.rawValue) DLL(s) into the bottle") }
 
         var state = bottles.state(plan.bottle)
-        // Wine's own default is RetinaMode off, so a fresh bottle only needs the registry write for "on".
+        // Retina mode makes Wine work in device pixels, so at Windows' default 96 DPI everything is drawn
+        // at half size (Battle.net "very small"). 192 DPI (200%) brings DPI-aware apps back to normal size.
+        // Wine's defaults are RetinaMode off and 96 DPI, so a fresh bottle with Retina off needs no writes.
+        let logPixels = plan.retina ? 192 : 96
+        var writes: [(name: String, args: [String])] = []
         if (state.retinaApplied ?? false) != plan.retina {
-            log("setting RetinaMode=\(plan.retina ? "y" : "n")")
-            let code = try Subprocess.run(
-                plan.executable,
-                ["reg", "add", #"HKCU\Software\Wine\Mac Driver"#, "/v", "RetinaMode", "/t", "REG_SZ", "/d", plan.retina ? "y" : "n", "/f"],
-                environment: plan.environment, output: output)
-            guard code == 0 else { throw MGError.processFailed("setting RetinaMode", code) }
+            writes.append(("RetinaMode=\(plan.retina ? "y" : "n")",
+                           ["reg", "add", #"HKCU\Software\Wine\Mac Driver"#, "/v", "RetinaMode", "/t", "REG_SZ", "/d", plan.retina ? "y" : "n", "/f"]))
+        }
+        if (state.logPixelsApplied ?? 96) != logPixels {
+            writes.append(("LogPixels=\(logPixels)",
+                           ["reg", "add", #"HKCU\Control Panel\Desktop"#, "/v", "LogPixels", "/t", "REG_DWORD", "/d", "\(logPixels)", "/f"]))
+        }
+        if !writes.isEmpty {
+            log("setting \(writes.map(\.name).joined(separator: ", "))")
+            for w in writes {
+                let code = try Subprocess.run(plan.executable, w.args, environment: plan.environment, output: output)
+                guard code == 0 else { throw MGError.processFailed("setting \(w.name)", code) }
+            }
             state.retinaApplied = plan.retina
+            state.logPixelsApplied = logPixels
             try bottles.saveState(state, plan.bottle)
         }
     }

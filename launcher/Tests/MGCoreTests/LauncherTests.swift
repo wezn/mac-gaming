@@ -102,7 +102,9 @@ final class LauncherTests: XCTestCase {
         let bottle = try BottleStore(paths: sb.paths).get("b")
         XCTAssertTrue(bottle.isInitialized, "wineboot --init ran")
         XCTAssertEqual(sb.read(BackendFiles.system32(bottle.prefix).appendingPathComponent("d3d9.dll")), "dxvk64-d3d9.dll")
-        XCTAssertTrue(sb.read(bottle.prefix.appendingPathComponent("reg.log")).contains("RetinaMode /t REG_SZ /d y /f"))
+        let reg = sb.read(bottle.prefix.appendingPathComponent("reg.log"))
+        XCTAssertTrue(reg.contains("RetinaMode /t REG_SZ /d y /f"), reg)
+        XCTAssertTrue(reg.contains(#"HKCU\Control Panel\Desktop /v LogPixels /t REG_DWORD /d 192 /f"#), reg)
         XCTAssertEqual(notes.count, 3, "\(notes)")
 
         // A second prepare does nothing.
@@ -144,6 +146,28 @@ final class LauncherTests: XCTestCase {
         let p = try l.plan(RunRequest(bottle: "b", backend: .wined3d, program: "notepad.exe"))
         try l.prepare(p)
         XCTAssertFalse(FileManager.default.fileExists(atPath: sb.paths.bottle("b").appendingPathComponent("reg.log").path))
+    }
+
+    func testRetinaOffRestoresDPIAndOldBottlesGetDPI() throws {
+        let sb = try Sandbox()
+        let l = try setUp(sb)
+        let reg = sb.paths.bottle("b").appendingPathComponent("reg.log")
+        try l.prepare(try l.plan(RunRequest(bottle: "b", backend: .wined3d, program: "notepad.exe", retina: true)))
+        try FileManager.default.removeItem(at: reg)
+
+        var notes: [String] = []
+        try l.prepare(try l.plan(RunRequest(bottle: "b", backend: .wined3d, program: "notepad.exe", retina: false)),
+                      log: { notes.append($0) })
+        XCTAssertEqual(notes, ["setting RetinaMode=n, LogPixels=96"])
+        XCTAssertTrue(sb.read(reg).contains("LogPixels /t REG_DWORD /d 96 /f"))
+
+        // A bottle that got Retina before mgx wrote LogPixels only needs the DPI.
+        let bottle = try BottleStore(paths: sb.paths).get("b")
+        try BottleStore(paths: sb.paths).saveState(BottleState(retinaApplied: true), bottle)
+        notes = []
+        try l.prepare(try l.plan(RunRequest(bottle: "b", backend: .wined3d, program: "notepad.exe", retina: true)),
+                      log: { notes.append($0) })
+        XCTAssertEqual(notes, ["setting LogPixels=192"])
     }
 
     func testExecuteReportsExitCode() throws {
