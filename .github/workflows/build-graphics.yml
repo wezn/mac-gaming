@@ -11,6 +11,9 @@ on:
         description: CrossOver Wine version to build DXMT against (and smoke-test with)
         required: true
         default: "26.3.0"
+  # TEMPORARY: workflow_dispatch needs the file on the default branch; remove before merge.
+  push:
+    branches: [graphics-builds]
 
 # Least privilege: the jobs only need to read the repo.
 permissions:
@@ -21,7 +24,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  CX_VERSION: ${{ inputs.crossover_version }}
+  CX_VERSION: ${{ inputs.crossover_version || '26.3.0' }}
 
 jobs:
   # DXMT links winemetal against Wine's import libs, winebuild, ntdll.so and winemac.so,
