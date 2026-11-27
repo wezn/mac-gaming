@@ -1,0 +1,181 @@
+name: Battle.net probe
+
+# Installs the real Battle.net client with mgx and the latest Wine / DXMT / DXVK builds, starts it,
+# and records what happens: crash backtraces (winedbg in auto mode), Wine logs and screenshots.
+# No account or login is involved: the client is expected to reach its login window.
+# A diagnostic, not a gate: a crashing client is reported in the job summary, not as a failure.
+# It depends on Blizzard's servers, so it only runs by hand or when this file changes.
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - .github/workflows/battlenet.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: battlenet-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  probe:
+    name: Battle.net (${{ matrix.name }})
+    runs-on: macos-15
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      actions: read # download the artifacts of other workflow runs
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: wined3d, backend: wined3d, env: "" }
+          - { name: dxmt, backend: dxmt, env: "" }
+          - { name: wined3d-writecopy, backend: wined3d, env: WINE_SIMULATE_WRITECOPY=1 }
+          - { name: dxmt-writecopy, backend: dxmt, env: WINE_SIMULATE_WRITECOPY=1 }
+    defaults:
+      run:
+        shell: bash # -eo pipefail
+    env:
+      BACKEND: ${{ matrix.backend }}
+      VARIANT_ENV: ${{ matrix.env }}
+      VARIANT: ${{ matrix.name }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up paths
+        run: |
+          {
+            echo "MG_HOME=$RUNNER_TEMP/mg"
+            echo "MGX=$GITHUB_WORKSPACE/launcher/.build/release/mgx"
+            echo "SHOTS=$RUNNER_TEMP/screenshots"
+            echo "BN_DIR=$RUNNER_TEMP/mg/bottles/bn/drive_c/Program Files (x86)/Battle.net"
+          } >> "$GITHUB_ENV"
+
+      - name: Ensure Rosetta 2
+        run: arch -x86_64 /usr/bin/true || sudo softwareupdate --install-rosetta --agree-to-license
+
+      - name: Cache SwiftPM
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: launcher/.build
+          key: spm-${{ runner.os }}-${{ hashFiles('launcher/Package.resolved') }}
+
+      - name: Build mgx
+        working-directory: launcher
+        run: swift build -c release
+
+      - name: Download the latest Wine, DXMT and DXVK artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          wine_run=$(gh run list --repo "$REPO" --workflow build-wine.yml --status success --limit 1 --json databaseId --jq '.[0].databaseId // empty')
+          gfx_run=$(gh run list --repo "$REPO" --workflow build-graphics.yml --status success --limit 1 --json databaseId --jq '.[0].databaseId // empty')
+          [[ -n "$wine_run" && -n "$gfx_run" ]] || { echo "::error::need a successful Build Wine and Build graphics layers run"; exit 1; }
+          echo "Wine from run $wine_run, DXMT/DXVK from run $gfx_run"
+          gh run download "$wine_run" --repo "$REPO" --pattern 'wine-crossover-*' --dir "$RUNNER_TEMP/wine-artifact"
+          gh run download "$gfx_run" --repo "$REPO" --pattern 'dxmt-*' --pattern 'dxvk-macos-*' --dir "$RUNNER_TEMP/gfx-artifact"
+          echo "WINE_RUN=$wine_run" >> "$GITHUB_ENV"
+
+      - name: Install runtime and create the bottle
+        run: |
+          $MGX runtime install "$RUNNER_TEMP/wine-artifact"
+          $MGX runtime install "$RUNNER_TEMP/gfx-artifact"
+          $MGX bottle create bn --backend "$BACKEND"
+          if [[ -n "$VARIANT_ENV" ]]; then $MGX bottle set bn --env "$VARIANT_ENV"; fi
+          # Crashes print a backtrace into the log instead of opening the crash dialog.
+          $MGX run --bottle bn --backend wined3d reg.exe add 'HKCU\Software\Wine\WineDbg' /v ShowCrashDialog /t REG_DWORD /d 0 /f
+          $MGX doctor || true
+
+      - name: Download the Battle.net installer
+        run: |
+          # Same URL as `mgx battlenet install` (launcher/Sources/MGCore/Installers.swift).
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/Battle.net-Setup.exe" \
+            'https://www.battle.net/download/getInstallerForGame?os=win&gameProgram=BATTLENET_APP&version=Live'
+          ls -l "$RUNNER_TEMP/Battle.net-Setup.exe"
+
+      - name: Install Battle.net
+        run: |
+          mkdir -p "$SHOTS"
+          # --lang/--installpath skip the installer's language and folder questions. The installer
+          # downloads the client and then starts it, which is where crashes show up first.
+          $MGX run --bottle bn --backend "$BACKEND" --debug 'err+all,+seh' "$RUNNER_TEMP/Battle.net-Setup.exe" \
+            --lang=enUS '--installpath=C:\Program Files (x86)\Battle.net' > "$RUNNER_TEMP/install.out" 2>&1 &
+          pid=$!
+          # Up to 15 min for Battle.net.exe to appear, then 90 s for the client it starts.
+          installed=false
+          for i in $(seq 1 90); do
+            if [[ -f "$BN_DIR/Battle.net.exe" ]]; then installed=true; break; fi
+            if (( i % 6 == 0 )); then screencapture -x "$SHOTS/install-$i.png" || true; fi
+            sleep 10
+          done
+          if $installed; then
+            for i in $(seq 1 9); do sleep 10; screencapture -x "$SHOTS/install-client-$i.png" || true; done
+          fi
+          pgrep -fl 'Battle.net|Agent.exe' || true
+          $MGX bottle stop bn || true
+          for _ in $(seq 1 30); do kill -0 "$pid" 2>/dev/null || break; sleep 1; done
+          kill -9 "$pid" 2>/dev/null || true
+          cat "$RUNNER_TEMP/install.out" || true
+          ls -la "$BN_DIR" || true
+          echo "INSTALLED=$installed" >> "$GITHUB_ENV"
+          $installed || { echo "::error::Battle.net.exe was not installed within 15 minutes (see screenshots)"; exit 1; }
+
+      - name: Start Battle.net
+        run: |
+          # The same program `mgx battlenet run` starts, with crash tracing.
+          exe="$BN_DIR/Battle.net Launcher.exe"
+          [[ -f "$exe" ]] || exe="$BN_DIR/Battle.net.exe"
+          $MGX run --bottle bn --debug 'err+all,+seh,+loaddll' "$exe" > "$RUNNER_TEMP/client.out" 2>&1 &
+          pid=$!
+          for i in $(seq 1 12); do sleep 10; screencapture -x "$SHOTS/client-$((i * 10))s.png" || true; done
+          pgrep -fl 'Battle.net' | tee "$RUNNER_TEMP/alive.txt" || true
+          $MGX bottle stop bn || true
+          for _ in $(seq 1 30); do kill -0 "$pid" 2>/dev/null || break; sleep 1; done
+          kill -9 "$pid" 2>/dev/null || true
+          cat "$RUNNER_TEMP/client.out" || true
+
+      - name: Summary
+        if: always()
+        run: |
+          logs="$MG_HOME/logs/bn"
+          ls -l "$logs" || true
+          install_log=$(find "$logs" -name '*Setup*.log' 2>/dev/null | sort | tail -n 1)
+          client_log=$(find "$logs" -name '*.log' ! -name '*Setup*' ! -name '*reg*' 2>/dev/null | sort | tail -n 1)
+          count() { if [[ -f "$1" ]]; then grep -c 'Unhandled exception' "$1" || true; else echo 0; fi; }
+          {
+            echo "## Battle.net: $VARIANT"
+            echo "- backend: \`$BACKEND\`, extra env: \`${VARIANT_ENV:-none}\`, Wine from Build Wine run $WINE_RUN"
+            echo "- installed: ${INSTALLED:-unknown}"
+            echo "- crashes during install (incl. the client it starts): $(count "$install_log")"
+            echo "- crashes after starting the client: $(count "$client_log")"
+            echo "- Battle.net processes still running after 120 s: $(grep -c 'Battle.net.exe' "$RUNNER_TEMP/alive.txt" 2>/dev/null || true)"
+            for f in "$client_log" "$install_log"; do
+              [[ -f "$f" ]] || continue
+              if grep -q 'Unhandled exception' "$f"; then
+                echo
+                echo "First crash in \`$(basename "$f")\`:"
+                echo '```'
+                grep -m1 -A40 'Unhandled exception' "$f" | grep -v '^\s*VK_\|mvk-info' | head -n 45
+                echo '```'
+                break
+              fi
+            done
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload logs and screenshots
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: battlenet-${{ matrix.name }}
+          path: |
+            ${{ runner.temp }}/mg/logs
+            ${{ runner.temp }}/screenshots
+            ${{ runner.temp }}/install.out
+            ${{ runner.temp }}/client.out
+          if-no-files-found: ignore
