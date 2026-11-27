@@ -5,8 +5,8 @@ import Darwin
 import Glibc
 #endif
 
-public struct DoctorCheck: Equatable, Sendable {
-    public enum Status: String, Sendable { case ok, warning, error }
+public struct DoctorCheck: Codable, Equatable, Sendable {
+    public enum Status: String, Codable, Sendable { case ok, warning, error }
     public var status: Status
     public var title: String
     public var detail: String
@@ -50,6 +50,27 @@ public struct Doctor {
         #else
         return nil
         #endif
+    }
+
+    /// The text `mg doctor` prints.
+    public static func render(_ checks: [DoctorCheck]) -> String {
+        checks.map { c in
+            let mark = c.status == .ok ? "✓" : c.status == .warning ? "!" : "✗"
+            return "\(mark) \(c.title)\(c.detail.isEmpty ? "" : "\n    \(c.detail)")\n"
+        }.joined()
+    }
+
+    /// `mg doctor --json`: `{"ok": false, "errors": 1, "warnings": 2, "checks": [{"status", "title", "detail"}]}`.
+    public static func json(_ checks: [DoctorCheck]) -> String {
+        struct Out: Encodable {
+            var ok: Bool
+            var errors: Int
+            var warnings: Int
+            var checks: [DoctorCheck]
+        }
+        let errors = checks.filter { $0.status == .error }.count
+        let out = Out(ok: errors == 0, errors: errors, warnings: checks.filter { $0.status == .warning }.count, checks: checks)
+        return String(decoding: (try? JSONFile.encoder.encode(out)) ?? Data("{}".utf8), as: UTF8.self) + "\n"
     }
 
     public func run() -> [DoctorCheck] {
@@ -131,9 +152,17 @@ public struct Doctor {
         let gptkPath = environment["MG_GPTK"].flatMap { $0.isEmpty ? nil : $0 } ?? config.gptkPath
         if let p = gptkPath {
             if let g = GPTKInstall.resolve(p) {
+                let version = g.version.map { " \($0)" } ?? ""
                 out.append(g.hasFramework
-                           ? .init(.ok, "D3DMetal (GPTK)", g.libRoot.path)
+                           ? .init(.ok, "D3DMetal (GPTK)\(version)", g.libRoot.path)
                            : .init(.warning, "D3DMetal (GPTK)", "\(g.libRoot.path) has no external/D3DMetal.framework"))
+                for rt in runtimes where FileManager.default.fileExists(atPath: rt.d3dmetalWineRoot.path) {
+                    let fw = rt.d3dmetalWineRoot.appendingPathComponent("lib/external/D3DMetal.framework")
+                    out.append(FileManager.default.fileExists(atPath: fw.path)
+                               ? .init(.ok, "runtime \(rt.name): D3DMetal overlay", rt.d3dmetalWineRoot.path)
+                               : .init(.error, "runtime \(rt.name): D3DMetal overlay is broken",
+                                       "\(fw.path) is missing; the next D3DMetal run rebuilds it only if Wine or the GPTK changed. Remove \(rt.d3dmetalWineRoot.path) to force a rebuild"))
+                }
             } else {
                 out.append(.init(.error, "D3DMetal (GPTK)", "\(p) does not look like a Game Porting Toolkit (no lib/wine/x86_64-windows/d3d12.dll)"))
             }

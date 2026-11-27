@@ -3,9 +3,10 @@ name: Launcher
 on:
   push:
     branches: [main]
-  # Any base branch, so stacked PRs (based on another PR's branch) get CI too. Never
-  # pull_request_target: this workflow runs PR code.
+  # Any base branch, so stacked PRs (based on another PR's branch) get CI and an mg build
+  # too. Never pull_request_target: this workflow runs PR code.
   pull_request:
+  workflow_dispatch:
 
 # Least privilege: jobs only read the repo unless they say otherwise.
 permissions:
@@ -44,9 +45,41 @@ jobs:
         run: swift test --parallel
 
       - name: CLI sanity
+        env:
+          MG_HOME: ${{ runner.temp }}/mg-sanity
         run: |
           .build/release/mg --version
           .build/release/mg detect Tests/MGCoreTests/Fixtures/dx12.exe | grep -q "DirectX 12"
+          # No runtime installed, so doctor reports an error (exit 1); the JSON must still parse.
+          code=0; .build/release/mg doctor --json > "$RUNNER_TEMP/doctor.json" || code=$?
+          [[ "$code" == 1 ]] || { echo "::error::expected mg doctor to exit 1 on an empty root, got $code"; exit 1; }
+          python3 -c 'import json, sys; d = json.load(open(sys.argv[1])); assert d["ok"] is False and d["checks"], d' "$RUNNER_TEMP/doctor.json"
+          .build/release/mg report -o "$RUNNER_TEMP/report.tar.gz"
+          tar -tzf "$RUNNER_TEMP/report.tar.gz" | grep -q '/doctor.json$'
+
+      # A ready-to-run binary for testers, so they don't need Xcode. It is unsigned (only the
+      # linker's ad-hoc signature): see docs/TESTING.md for the Gatekeeper step. Packed as a
+      # tarball because artifact zips drop the executable bit.
+      - name: Package mg
+        id: package
+        run: |
+          bin=.build/release/mg
+          archs=$(lipo -archs "$bin")
+          [[ "$archs" == *arm64* ]] || { echo "::error::mg is not arm64 ($archs)"; exit 1; }
+          codesign -dv "$bin" 2>&1 | grep -E '^(Identifier|Signature|CodeDirectory)' || true
+          out="$RUNNER_TEMP/mg-dist"
+          mkdir -p "$out"
+          tar -czf "$out/mg-macos-arm64.tar.gz" -C .build/release mg
+          (cd "$out" && shasum -a 256 mg-macos-arm64.tar.gz | tee mg-macos-arm64.tar.gz.sha256)
+          echo "dir=$out" >> "$GITHUB_OUTPUT"
+
+      - name: Upload mg binary
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: mg-macos-arm64
+          path: ${{ steps.package.outputs.dir }}
+          if-no-files-found: error
+          retention-days: 30
 
   smoke:
     # Runs mg against the real Wine build from the latest successful "Build Wine" run and the
@@ -280,10 +313,25 @@ jobs:
             if grep -iq 'loaddll.*wined3d\.dll' "$RUNNER_TEMP/load.log"; then fail "[$rundll] DXVK: Wine's own d3d11 (wined3d) was loaded"; fi
           done
 
+      - name: Diagnostics report
+        if: always() && steps.wine.outputs.found == 'true'
+        run: |
+          mg=launcher/.build/release/mg
+          $mg doctor --json || true
+          $mg report -o "$RUNNER_TEMP/mg/mg-report"
+          find "$RUNNER_TEMP/mg/mg-report" -type f | sort
+          cat "$RUNNER_TEMP/mg/mg-report/runtimes.txt"
+          if [[ "${{ steps.gfx.outputs.found }}" == true ]]; then
+            grep -q '^present: DXMT overlay winemetal.so' "$RUNNER_TEMP/mg/mg-report/runtimes.txt" || { echo "::error::mg report does not show the wine-dxmt overlay"; exit 1; }
+          fi
+          tar -czf "$RUNNER_TEMP/mg/mg-report.tar.gz" -C "$RUNNER_TEMP/mg" mg-report
+
       - name: Upload logs
         if: always() && steps.wine.outputs.found == 'true'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: smoke-logs
-          path: ${{ runner.temp }}/mg/logs
+          path: |
+            ${{ runner.temp }}/mg/logs
+            ${{ runner.temp }}/mg/mg-report.tar.gz
           if-no-files-found: ignore
