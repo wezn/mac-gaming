@@ -7,10 +7,6 @@ on:
         description: CrossOver source version (see codeweavers.com/crossover/source)
         required: true
         default: "26.3.0"
-  # workflow_dispatch only works once this file is on the default branch.
-  push:
-    branches: [wine-build-ci]
-    paths: [scripts/build-wine.sh, .github/workflows/build-wine.yml]
 
 jobs:
   build:
@@ -18,7 +14,7 @@ jobs:
     runs-on: [self-hosted, macOS, ARM64]
     timeout-minutes: 120
     env:
-      CX_VERSION: ${{ inputs.crossover_version || '26.3.0' }}
+      CX_VERSION: ${{ inputs.crossover_version }}
     steps:
       - uses: actions/checkout@v4
       - name: Build
