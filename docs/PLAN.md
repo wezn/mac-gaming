@@ -48,7 +48,7 @@ pick carefully.
 ## Milestones
 
 1. CI build of Wine (CrossOver source) + msync on macOS runners → `.tar.xz` artifact
-2. Integrate DXMT, DXVK+MoltenVK, optional D3DMetal; CLI `mg run game.exe --backend=auto`
+2. Integrate DXMT, DXVK+MoltenVK, optional D3DMetal; CLI `mgx run game.exe --backend=auto`
 3. Bottle management + Steam bootstrap
 4. SwiftUI launcher app, signed `.app`
 5. Per-game profiles DB + benchmarking harness (frame-time capture per backend)

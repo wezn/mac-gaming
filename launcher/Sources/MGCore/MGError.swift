@@ -22,17 +22,17 @@ public enum MGError: Error, CustomStringConvertible, Equatable {
         case .bottleExists(let n):
             return "bottle '\(n)' already exists"
         case .bottleNotFound(let n):
-            return "bottle '\(n)' does not exist (create it with `mg bottle create \(n)`)"
+            return "bottle '\(n)' does not exist (create it with `mgx bottle create \(n)`)"
         case .runtimeNotFound(let n):
-            return "runtime '\(n)' is not installed (see `mg runtime list`)"
+            return "runtime '\(n)' is not installed (see `mgx runtime list`)"
         case .noRuntime:
-            return "no runtime installed: run `mg runtime install <wine-crossover-*.tar.xz | dir>`"
+            return "no runtime installed: run `mgx runtime install <wine-crossover-*.tar.xz | dir>`"
         case .ambiguousRuntime(let names):
-            return "several runtimes are installed (\(names.joined(separator: ", "))): pick one with `mg config set default-runtime <name>` or `--runtime`"
+            return "several runtimes are installed (\(names.joined(separator: ", "))): pick one with `mgx config set default-runtime <name>` or `--runtime`"
         case .backendUnavailable(let b, let hint):
             return "backend '\(b.rawValue)' is not available: \(hint)"
         case .dx12NeedsD3DMetal(let exe):
-            return "\(exe) uses DirectX 12, which needs D3DMetal. D3DMetal cannot be redistributed: install Apple's Game Porting Toolkit and run `mg config set gptk <path-to-gptk>`, or force another backend with --backend"
+            return "\(exe) uses DirectX 12, which needs D3DMetal. D3DMetal cannot be redistributed: install Apple's Game Porting Toolkit and run `mgx config set gptk <path-to-gptk>`, or force another backend with --backend"
         case .invalidArchive(let m):
             return m
         case .invalidConfig(let m):

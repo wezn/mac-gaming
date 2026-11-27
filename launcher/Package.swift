@@ -2,11 +2,11 @@
 import PackageDescription
 
 let package = Package(
-    name: "mg",
+    name: "mgx",
     platforms: [.macOS(.v13)],
     products: [
         .library(name: "MGCore", targets: ["MGCore"]),
-        .executable(name: "mg", targets: ["mg"]),
+        .executable(name: "mgx", targets: ["mgx"]),
     ],
     dependencies: [
         .package(url: "https://github.com/apple/swift-argument-parser", from: "1.5.0"),
@@ -16,7 +16,7 @@ let package = Package(
         .target(name: "MGCore"),
         // Thin CLI over MGCore.
         .executableTarget(
-            name: "mg",
+            name: "mgx",
             dependencies: [
                 "MGCore",
                 .product(name: "ArgumentParser", package: "swift-argument-parser"),

@@ -1,24 +1,24 @@
 #!/bin/bash
-# A guided first test of mg on a real Mac. See docs/TESTING.md.
+# A guided first test of mgx on a real Mac. See docs/TESTING.md.
 #
-# Downloads the newest CI builds (mg, Wine, DXMT/DXVK) with `gh run download`, installs them into a
+# Downloads the newest CI builds (mgx, Wine, DXMT/DXVK) with `gh run download`, installs them into a
 # throwaway MG_HOME, then walks through a checklist: wined3d Notepad, backend dry runs, DLL deployment
 # probes, the D3DMetal overlay, Battle.net + Overwatch 2, Steam + CS2. Every long step asks first, and
 # each step's outcome is recorded. At the end everything goes into one .tar.gz to attach to an issue.
 #
 # Safety: never uses sudo, never deletes anything (it only creates files under its work directory),
-# and only touches the mg root you give it (default: a fresh one under the work directory).
+# and only touches the mgx root you give it (default: a fresh one under the work directory).
 #
-# Usage: scripts/mg-test-session.sh [options]
+# Usage: scripts/mgx-test-session.sh [options]
 #   --work DIR          Work directory: downloads, sessions, results (default: ~/mg-test)
-#   --mg-home DIR       mg root to use (default: <work>/home)
-#   --mg PATH           Use this mg binary instead of downloading the CI build
+#   --mg-home DIR       mgx root to use (default: <work>/home)
+#   --mg PATH           Use this mgx binary instead of downloading the CI build
 #   --gptk PATH         Game Porting Toolkit path (skips the prompt); "none" to skip D3DMetal
 #   --repo OWNER/NAME   Repository to download from (default: wezn/mac-gaming)
 #   --mg-run ID, --wine-run ID, --graphics-run ID
 #                       Use these workflow runs instead of the newest successful ones
 #   --from N            Start the checklist at step N (after setup), e.g. to resume
-#   --package-only      Skip everything and just collect a report for the mg root
+#   --package-only      Skip everything and just collect a report for the mgx root
 #   -h, --help          Show this help
 #
 # Bash 3.2 compatible (the /bin/bash macOS ships).
@@ -183,8 +183,8 @@ redact_file() {
 # ---------- preflight ----------
 
 [[ "$(id -u)" != 0 ]] || die "do not run this as root or with sudo"
-[[ "$(uname -s)" == Darwin ]] || die "this script tests mg on macOS; run it on the Mac"
-[[ "$(uname -m)" == arm64 ]] || echo "warning: this is not an Apple Silicon Mac ($(uname -m)); mg targets Apple Silicon"
+[[ "$(uname -s)" == Darwin ]] || die "this script tests mgx on macOS; run it on the Mac"
+[[ "$(uname -m)" == arm64 ]] || echo "warning: this is not an Apple Silicon Mac ($(uname -m)); mgx targets Apple Silicon"
 
 mkdir -p "$WORK"
 WORK=$(cd "$WORK" && pwd)
@@ -194,7 +194,7 @@ TRANSCRIPT="$SESSION/transcript.log"
 RESULTS="$SESSION/results.md"
 : > "$TRANSCRIPT"
 {
-  echo "# mg test session $STAMP"
+  echo "# mgx test session $STAMP"
   echo
   echo "Steps and outcomes (PASS / FAIL / SKIPPED, with the tester's notes):"
   echo
@@ -204,7 +204,7 @@ if [[ -n "$MG_HOME_ARG" ]]; then
   mkdir -p "$MG_HOME_ARG"
   MG_HOME=$(cd "$MG_HOME_ARG" && pwd)
   if [[ "$MG_HOME" == "$HOME/Library/Application Support/mac-gaming" ]]; then
-    warn "that is mg's real default root; bottles created here are your everyday ones."
+    warn "that is mgx's real default root; bottles created here are your everyday ones."
     ask "Use it anyway?" n || exit 0
   fi
 else
@@ -212,11 +212,11 @@ else
   mkdir -p "$MG_HOME"
 fi
 export MG_HOME
-# Things in the shell that would change Wine's behaviour behind mg's back.
+# Things in the shell that would change Wine's behaviour behind mgx's back.
 unset WINEPREFIX WINEDLLOVERRIDES WINEDEBUG WINELOADER WINESERVER WINEDLLPATH WINEARCH MG_GPTK 2>/dev/null || true
 
 info "work directory: $WORK"
-info "mg root (MG_HOME): $MG_HOME"
+info "mgx root (MG_HOME): $MG_HOME"
 info "session: $SESSION"
 
 # ---------- packaging (also runs on exit, so a quit or failure still leaves a report) ----------
@@ -233,7 +233,7 @@ package() {
   local out="$SESSION/report"
   mkdir -p "$out"
   {
-    echo "script: scripts/mg-test-session.sh ($(git -C "$REPO_ROOT" rev-parse --short HEAD 2>/dev/null || echo 'not a git checkout'))"
+    echo "script: scripts/mgx-test-session.sh ($(git -C "$REPO_ROOT" rev-parse --short HEAD 2>/dev/null || echo 'not a git checkout'))"
     echo "repo: $REPO"
     echo "runs: mg=${MG_RUN:-local} wine=${WINE_RUN:-none} graphics=${GFX_RUN:-none}"
     echo "date: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
@@ -254,7 +254,7 @@ package() {
     echo "path: ${GPTK_PATH:-not set}"
     gptk_version
     echo
-    echo "## mg"
+    echo "## mgx"
     if [[ -n "$MG" ]]; then
       "$MG" --version
       "$MG" config show
@@ -270,7 +270,7 @@ package() {
     "$MG" doctor > "$out/doctor.txt" 2>&1
     "$MG" doctor --json > "$out/doctor.json" 2>&1
     "$MG" logs -n 100 > "$out/logs-list.txt" 2>&1
-    "$MG" report --logs 30 -o "$out/mg-report" > /dev/null 2>"$out/mg-report.err" || warn "mg report failed: $(cat "$out/mg-report.err")"
+    "$MG" report --logs 30 -o "$out/mgx-report" > /dev/null 2>"$out/mgx-report.err" || warn "mgx report failed: $(cat "$out/mgx-report.err")"
   fi
   cp "$RESULTS" "$out/results.md"
   cp "$TRANSCRIPT" "$out/transcript.log"
@@ -303,8 +303,8 @@ gptk_version() {
 trap package EXIT
 
 if $PACKAGE_ONLY; then
-  MG="${MG_ARG:-$(command -v mg || true)}"
-  [[ -n "$MG" ]] || die "no mg binary: pass --mg PATH"
+  MG="${MG_ARG:-$(command -v mgx || true)}"
+  [[ -n "$MG" ]] || die "no mgx binary: pass --mg PATH"
   GPTK_PATH="$GPTK_ARG"
   exit 0
 fi
@@ -343,32 +343,32 @@ fetch() {
 }
 
 info "looking up CI builds in $REPO"
-if [[ -z "$MG_ARG" && -z "$MG_RUN" ]]; then MG_RUN=$(newest_run launcher.yml '^mg-macos-arm64$'); fi
+if [[ -z "$MG_ARG" && -z "$MG_RUN" ]]; then MG_RUN=$(newest_run launcher.yml '^mgx-macos-arm64$'); fi
 if [[ -z "$WINE_RUN" ]]; then WINE_RUN=$(newest_run build-wine.yml '^wine-crossover-'); fi
 if [[ -z "$GFX_RUN" ]]; then GFX_RUN=$(newest_run build-graphics.yml '^(dxmt|dxvk-macos)-'); fi
-if [[ -n "$MG_ARG" ]]; then say "mg: $MG_ARG (local)"; else say "mg: ${MG_RUN:-none found} (Launcher workflow)"; fi
+if [[ -n "$MG_ARG" ]]; then say "mgx: $MG_ARG (local)"; else say "mgx: ${MG_RUN:-none found} (Launcher workflow)"; fi
 say "wine: ${WINE_RUN:-none found} (Build Wine)"
 say "graphics: ${GFX_RUN:-none found} (Build graphics layers)"
-[[ -n "$MG_ARG" || -n "$MG_RUN" ]] || die "no Launcher run with an mg-macos-arm64 artifact; build mg (cd launcher && swift build -c release) and pass --mg launcher/.build/release/mg"
+[[ -n "$MG_ARG" || -n "$MG_RUN" ]] || die "no Launcher run with an mgx-macos-arm64 artifact; build mgx (cd launcher && swift build -c release) and pass --mg launcher/.build/release/mgx"
 [[ -n "$WINE_RUN" ]] || die "no successful Build Wine run with an unexpired artifact; run build-wine.yml first"
 if [[ -z "$GFX_RUN" ]]; then
   warn "no Build graphics layers artifacts yet: DXMT and DXVK steps will be skipped (wined3d and D3DMetal still work)"
 fi
 
-say "Downloads: Wine ~85 MB, DXMT ~10 MB, DXVK ~3 MB, mg ~5 MB (cached under $WORK/downloads)."
+say "Downloads: Wine ~85 MB, DXMT ~10 MB, DXVK ~3 MB, mgx ~5 MB (cached under $WORK/downloads)."
 ask "Download now?" y || exit 0
 
 if [[ -n "$MG_ARG" ]]; then
   MG=$(cd "$(dirname "$MG_ARG")" && pwd)/$(basename "$MG_ARG")
 else
-  d=$(fetch mg "$MG_RUN" mg-macos-arm64) || die "could not download mg"
-  tgz=$(find "$d" -name 'mg-macos-arm64.tar.gz' | head -n 1)
-  [[ -n "$tgz" ]] || die "no mg-macos-arm64.tar.gz in $d"
+  d=$(fetch mgx "$MG_RUN" mgx-macos-arm64) || die "could not download mgx"
+  tgz=$(find "$d" -name 'mgx-macos-arm64.tar.gz' | head -n 1)
+  [[ -n "$tgz" ]] || die "no mgx-macos-arm64.tar.gz in $d"
   sumfile="$tgz.sha256"
-  if [[ -f "$sumfile" ]]; then (cd "$(dirname "$tgz")" && shasum -a 256 -c "$(basename "$sumfile")") || die "mg checksum mismatch"; fi
+  if [[ -f "$sumfile" ]]; then (cd "$(dirname "$tgz")" && shasum -a 256 -c "$(basename "$sumfile")") || die "mgx checksum mismatch"; fi
   mkdir -p "$WORK/bin"
   tar -xzf "$tgz" -C "$WORK/bin"
-  MG="$WORK/bin/mg"
+  MG="$WORK/bin/mgx"
 fi
 # gh downloads are not quarantined, but a browser download would be. Only this one file is touched.
 if xattr -p com.apple.quarantine "$MG" >/dev/null 2>&1; then
@@ -408,7 +408,7 @@ HAS_DXMT=false; HAS_DXVK=false
 
 # ---------- doctor + GPTK ----------
 
-info "mg doctor"
+info "mgx doctor"
 run "$MG" doctor || warn "doctor reported errors (see above); later steps may fail"
 if ! arch -x86_64 /usr/bin/true 2>/dev/null; then
   warn "Rosetta 2 is missing. Install it yourself (this script never uses sudo):"
@@ -444,7 +444,7 @@ if [[ -n "$GPTK_PATH" ]]; then
   if run "$MG" config set gptk "$GPTK_PATH"; then
     HAS_GPTK=true
   else
-    warn "mg did not accept that folder. Its layout (please include this in the report):"
+    warn "mgx did not accept that folder. Its layout (please include this in the report):"
   fi
   gptk_version 2>&1 | tee -a "$TRANSCRIPT"
   if $HAS_GPTK; then run "$MG" doctor || true; fi
@@ -463,7 +463,7 @@ if step "wined3d sanity: Notepad" \
 fi
 
 if step "Backend selection dry runs (no side effects)" \
-  "Runs 'mg run --dry-run' on the synthetic test executables, auto and with each backend forced."; then
+  "Runs 'mgx run --dry-run' on the synthetic test executables, auto and with each backend forced."; then
   if [[ -d "$FIXTURES" ]]; then
     has_bottle mgtest || run "$MG" bottle create mgtest --no-init || true
     for exe in dx8.exe dx9.exe dx10.exe dx11.exe dx12.exe ddraw.exe engine/game.exe; do
@@ -491,7 +491,7 @@ probe() {
 }
 
 if $HAS_DXVK && step "DXVK DLL deploy" \
-  "Creates bottle 'mgdxvk', lets mg copy DXVK into system32/syswow64, and loads d3d11.dll with +loaddll."; then
+  "Creates bottle 'mgdxvk', lets mgx copy DXVK into system32/syswow64, and loads d3d11.dll with +loaddll."; then
   probe mgdxvk dxvk d3d11.dll || true
   compare_dlls dxvk "$MG_HOME/bottles/mgdxvk/drive_c/windows" \
     x64/d3d11.dll:system32/d3d11.dll x64/dxgi.dll:system32/dxgi.dll x32/d3d11.dll:syswow64/d3d11.dll
@@ -499,7 +499,7 @@ if $HAS_DXVK && step "DXVK DLL deploy" \
 fi
 
 if $HAS_DXMT && step "DXMT DLL deploy" \
-  "Creates bottle 'mgdxmt' and loads d3d11.dll with --backend dxmt under +loaddll. mg runs DXMT from runtimes/<r>/wine-dxmt/ (Wine with DXMT's DLLs and winemetal.so merged into lib/wine), keeps every D3D DLL builtin (no n,b overrides) and copies only winemetal.dll into system32/syswow64."; then
+  "Creates bottle 'mgdxmt' and loads d3d11.dll with --backend dxmt under +loaddll. mgx runs DXMT from runtimes/<r>/wine-dxmt/ (Wine with DXMT's DLLs and winemetal.so merged into lib/wine), keeps every D3D DLL builtin (no n,b overrides) and copies only winemetal.dll into system32/syswow64."; then
   probe mgdxmt dxmt d3d11.dll || true
   rt=$(first "$MG_HOME"/runtimes/*/wine-dxmt)
   if [[ -n "$rt" ]]; then

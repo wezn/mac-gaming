@@ -1,11 +1,13 @@
-# mg: the mac-gaming launcher
+# mgx: the mac-gaming launcher
 
-`mg` runs Windows games on Apple Silicon Macs with the Wine build from this repo and a graphics
-backend picked per game. It is a Swift package with three targets:
+`mgx` runs Windows games on Apple Silicon Macs with the Wine build from this repo and a graphics
+backend picked per game. (It was called `mg`, but macOS already ships `/usr/bin/mg`, a small Emacs-like
+editor, so typing `mg` could open that instead. The data folder, `MG_HOME` and the `.mg-*.json`
+state files keep their old names, so existing setups keep working.) It is a Swift package with three targets:
 
 - **MGCore**: all the logic (runtimes, bottles, backend selection, PE import scanning, environment
   construction, process launch, doctor). It depends only on Foundation.
-- **mg**: a thin command-line front end built on swift-argument-parser.
+- **mgx**: a thin command-line front end built on swift-argument-parser.
 - **MacGamingApp**: a SwiftUI app on top of MGCore (macOS only; see [App](#app)).
 
 ## Build
@@ -13,22 +15,22 @@ backend picked per game. It is a Swift package with three targets:
 ```sh
 cd launcher
 swift build -c release
-cp .build/release/mg /usr/local/bin/   # optional
+cp .build/release/mgx /usr/local/bin/   # optional
 swift test
 ```
 
 macOS 13+ is required at run time. macOS 15+ is recommended: Rosetta 2 translates AVX/AVX2 only from macOS 15.
 
-**Prebuilt:** every Launcher workflow run uploads an arm64 release build as the `mg-macos-arm64` artifact
-(`mg-macos-arm64.tar.gz` plus its SHA-256). It is unsigned: `gh run download` leaves it runnable, but a copy
-downloaded with a browser is quarantined and needs `xattr -d com.apple.quarantine mg` first.
+**Prebuilt:** every Launcher workflow run uploads an arm64 release build as the `mgx-macos-arm64` artifact
+(`mgx-macos-arm64.tar.gz` plus its SHA-256). It is unsigned: `gh run download` leaves it runnable, but a copy
+downloaded with a browser is quarantined and needs `xattr -d com.apple.quarantine mgx` first.
 
-**Testing on a Mac:** `scripts/mg-test-session.sh` downloads the newest mg, Wine and DXMT/DXVK builds, installs
+**Testing on a Mac:** `scripts/mgx-test-session.sh` downloads the newest mgx, Wine and DXMT/DXVK builds, installs
 them into a throwaway root and walks through a checklist. See [docs/TESTING.md](../docs/TESTING.md).
 
 ## App
 
-`MacGaming.app` is a native front end for the same bottles and runtimes: the app and `mg` share the
+`MacGaming.app` is a native front end for the same bottles and runtimes: the app and `mgx` share the
 data folder, so either can be used at any time.
 
 ```sh
@@ -49,14 +51,14 @@ What it does (v1):
   evidence, the chosen backend and why, warnings, DLL copies, the command, and every environment
   variable that differs from the app's environment), change the bottle, backend or arguments
   (re-planned as you edit), then Launch.
-- **Steam / Battle.net**: Install and Open buttons per bottle (same flow as `mg steam|battlenet install|run`).
+- **Steam / Battle.net**: Install and Open buttons per bottle (same flow as `mgx steam|battlenet install|run`).
 - **Wine Tools**: winecfg, regedit, explorer, taskmgr, notepad. **Stop All** runs `wineserver -k`.
 - **Runtimes**: install from a file picker or by dropping archives, zipped CI artifacts or folders;
   make default; remove. Each runtime shows whether its `wine-dxmt/` overlay is current and warns
   when DXMT was built against a different Wine; the run plan names the Wine tree it will use.
-- **Doctor**: the `mg doctor` checks. **Copy Diagnostics** puts a redacted `mg report` (without
+- **Doctor**: the `mgx doctor` checks. **Copy Diagnostics** puts a redacted `mgx report` (without
   logs) on the clipboard; **Save Report…** writes the full `.tar.gz`. **Logs**: every run log, with a live tail.
-- **Activity**: each background job (wineboot, an install, a running program) with mg's progress
+- **Activity**: each background job (wineboot, an install, a running program) with mgx's progress
   lines and its Wine log, tailing live. Settings (⌘,): GPTK path, default runtime and bottle.
 
 Long-running work never blocks the main thread: views call view models in the app target, which run
@@ -81,43 +83,43 @@ running games (use Stop All first).
 ```sh
 # 1. Install the Wine build (and optionally graphics backends). Pass files, zipped CI
 #    artifacts, or a directory containing them.
-mg runtime install ~/Downloads/wine-crossover-26.3.0-wow64.tar.xz \
+mgx runtime install ~/Downloads/wine-crossover-26.3.0-wow64.tar.xz \
                    ~/Downloads/dxmt-0.80.tar.xz ~/Downloads/dxvk-macos-1.10.3-20230507-repack.tar.xz
 
-# 2. Optional: point mg at your own Game Porting Toolkit for D3DMetal (needed for DX12).
-mg config set gptk "/Volumes/Evaluation environment for Windows games 2.1"
+# 2. Optional: point mgx at your own Game Porting Toolkit for D3DMetal (needed for DX12).
+mgx config set gptk "/Volumes/Evaluation environment for Windows games 2.1"
 
 # 3. Check the setup.
-mg doctor
+mgx doctor
 
 # 4. Run something.
-mg run ~/Games/SomeGame/Game.exe -windowed
+mgx run ~/Games/SomeGame/Game.exe -windowed
 ```
 
 ## Commands
 
 | Command | What it does |
 |---|---|
-| `mg runtime install <path>...` | Install `wine-crossover-*.tar.xz`, `dxmt-*.tar.xz`, `dxvk-macos-*.tar.xz` (or zips / directories containing them). `--name`, `--set-default` |
-| `mg runtime list` / `remove <name>` | List or remove runtimes |
-| `mg bottle create <name>` | Create a bottle and run `wineboot --init`. `--runtime`, `--backend`, `--no-msync`, `--retina`, `--hud`, `--env K=V`, `--no-init`, `--set-default` |
-| `mg bottle list` / `show <name>` | List bottles, or print a bottle's path and config |
-| `mg bottle set <name>` | Change settings: `--backend`, `--runtime`, `--[no-]msync`, `--[no-]retina`, `--[no-]hud`, `--env K=V`, `--unset-env K` |
-| `mg bottle stop <name>` | Kill every Wine process in the bottle (`wineserver -k`) |
-| `mg bottle delete <name> [-y]` | Delete the bottle and everything installed in it |
-| `mg run [options] <program> [args...]` | Run a program. See below |
-| `mg detect <exe>` | Show an executable's imports and detected DirectX version |
-| `mg steam install --bottle B` / `mg steam run --bottle B` | Download the official Steam installer, install silently, start the client |
-| `mg battlenet install --bottle B` / `mg battlenet run --bottle B` | Same for Battle.net (its installer is interactive) |
-| `mg config [show]` / `set <key> <value>` / `unset <key>` | Keys: `gptk`, `default-runtime`, `default-bottle` |
-| `mg doctor` | Check macOS version, Apple Silicon, Rosetta, runtimes, MoltenVK, DXMT, DXVK, the GPTK path (and its version), the D3DMetal overlay and bottles. Exits 1 on errors. `--json` for machine-readable output |
-| `mg report` | Bundle host facts, doctor (text and JSON), settings, runtime manifests, the DXMT and D3DMetal overlay state, bottle settings and the newest logs into `mg-report-<time>.tar.gz` for a bug report. `$HOME` becomes `~`, your account name `USER`. `-o PATH` (a directory unless it ends in `.tar.gz`), `--logs N`, `--log-kib N` |
-| `mg logs` | List per-run logs. `--last` prints the newest, `--path` prints paths only, `--bottle B`, `-n N` |
+| `mgx runtime install <path>...` | Install `wine-crossover-*.tar.xz`, `dxmt-*.tar.xz`, `dxvk-macos-*.tar.xz` (or zips / directories containing them). `--name`, `--set-default` |
+| `mgx runtime list` / `remove <name>` | List or remove runtimes |
+| `mgx bottle create <name>` | Create a bottle and run `wineboot --init`. `--runtime`, `--backend`, `--no-msync`, `--retina`, `--hud`, `--env K=V`, `--no-init`, `--set-default` |
+| `mgx bottle list` / `show <name>` | List bottles, or print a bottle's path and config |
+| `mgx bottle set <name>` | Change settings: `--backend`, `--runtime`, `--[no-]msync`, `--[no-]retina`, `--[no-]hud`, `--env K=V`, `--unset-env K` |
+| `mgx bottle stop <name>` | Kill every Wine process in the bottle (`wineserver -k`) |
+| `mgx bottle delete <name> [-y]` | Delete the bottle and everything installed in it |
+| `mgx run [options] <program> [args...]` | Run a program. See below |
+| `mgx detect <exe>` | Show an executable's imports and detected DirectX version |
+| `mgx steam install --bottle B` / `mgx steam run --bottle B` | Download the official Steam installer, install silently, start the client |
+| `mgx battlenet install --bottle B` / `mgx battlenet run --bottle B` | Same for Battle.net (its installer is interactive) |
+| `mgx config [show]` / `set <key> <value>` / `unset <key>` | Keys: `gptk`, `default-runtime`, `default-bottle` |
+| `mgx doctor` | Check macOS version, Apple Silicon, Rosetta, runtimes, MoltenVK, DXMT, DXVK, the GPTK path (and its version), the D3DMetal overlay and bottles. Exits 1 on errors. `--json` for machine-readable output |
+| `mgx report` | Bundle host facts, doctor (text and JSON), settings, runtime manifests, the DXMT and D3DMetal overlay state, bottle settings and the newest logs into `mgx-report-<time>.tar.gz` for a bug report. `$HOME` becomes `~`, your account name `USER`. `-o PATH` (a directory unless it ends in `.tar.gz`), `--logs N`, `--log-kib N` |
+| `mgx logs` | List per-run logs. `--last` prints the newest, `--path` prints paths only, `--bottle B`, `-n N` |
 
-### `mg run`
+### `mgx run`
 
 ```
-mg run [--bottle B] [--backend auto|d3dmetal|dxmt|dxvk|wined3d] [--env K=V]...
+mgx run [--bottle B] [--backend auto|d3dmetal|dxmt|dxvk|wined3d] [--env K=V]...
        [--[no-]hud] [--[no-]msync] [--[no-]retina] [--debug CHANNELS] [-v] [--dry-run]
        <program> [args...]
 ```
@@ -126,19 +128,19 @@ mg run [--bottle B] [--backend auto|d3dmetal|dxmt|dxvk|wined3d] [--env K=V]...
   `C:\` path inside the bottle, or a program Wine provides (`notepad.exe`, `winecfg`, `regedit`).
   `.msi` files go through `msiexec /i` and `.bat`/`.cmd` files through `cmd /c`.
 - Everything after `<program>` goes to the program unchanged, including things that look like flags.
-- Without `--bottle`, mg uses the default bottle (`mg config set default-bottle`), else a bottle
+- Without `--bottle`, mgx uses the default bottle (`mgx config set default-bottle`), else a bottle
   named `default`, which is created on first use.
 - Wine's output goes to the run's log file. `-v` also prints it to the terminal.
 - `--dry-run` prints the detected DirectX version, the chosen backend and why, the DLLs that would be
   copied, the command, and every environment variable that differs from your shell, then exits.
-- `mg` waits for the program and exits with its exit code.
+- `mgx` waits for the program and exits with its exit code.
 
 What a run sets up:
 
 | | |
 |---|---|
 | `WINEPREFIX` | the bottle directory |
-| `WINEMSYNC=1` | on by default (`--no-msync` or `mg bottle set B --no-msync`) |
+| `WINEMSYNC=1` | on by default (`--no-msync` or `mgx bottle set B --no-msync`) |
 | `WINEDLLOVERRIDES` | every D3D/DXGI DLL pinned to builtin, then the backend's DLLs set to `n,b`. Merged with any `WINEDLLOVERRIDES` from your shell, the bottle, the game override or `--env` (those win) |
 | `DYLD_FALLBACK_LIBRARY_PATH` | the runtime's `wine/lib` (bundled MoltenVK and freetype), plus D3DMetal's `external/` when used |
 | `WINEDEBUG=-all` | unless you set it (`--debug +loaddll`) |
@@ -152,7 +154,7 @@ Stray `WINELOADER`, `WINESERVER`, `WINEDLLPATH` and `WINEARCH` from your shell a
 Precedence: `--backend` > per-game override > the bottle's `backend` > auto-detection.
 
 Auto-detection reads the PE import and delay-import tables of the executable. If the executable
-imports no Direct3D DLL, mg checks the DLLs next to it (engines such as Source 2 load their renderer at
+imports no Direct3D DLL, mgx checks the DLLs next to it (engines such as Source 2 load their renderer at
 run time).
 
 | Detected | Backend |
@@ -166,16 +168,16 @@ run time).
 How each backend is wired:
 
 - **dxmt**: DXMT's DLLs are Wine *builtins* linked against one Wine build (`dxmt/VERSION` says which;
-  `mg doctor` warns on a mismatch). Wine loads builtins from its own `lib/wine` even when a copy sits
-  in `system32`, so mg runs DXMT from `runtimes/<r>/wine-dxmt/`: an APFS clone of `wine/` with DXMT's
+  `mgx doctor` warns on a mismatch). Wine loads builtins from its own `lib/wine` even when a copy sits
+  in `system32`, so mgx runs DXMT from `runtimes/<r>/wine-dxmt/`: an APFS clone of `wine/` with DXMT's
   `x86_64-windows/*.dll`, `i386-windows/*.dll` and `x86_64-unix/winemetal.so` merged into `lib/wine`.
-  It is built by `mg runtime install` and rebuilt when Wine or DXMT changes. Every D3D DLL stays
+  It is built by `mgx runtime install` and rebuilt when Wine or DXMT changes. Every D3D DLL stays
   builtin (no `n,b`). `winemetal.dll` is copied into the bottle's `system32`/`syswow64`, because
   `wineboot` does not put it there. `wine/` stays stock for wined3d and DXVK bottles.
 - **dxvk**: `x64/*.dll` → `system32`, `x32/*.dll` → `syswow64`, all `n,b`.
-- **d3dmetal**: D3DMetal replaces Wine builtins, so mg runs it from `runtimes/<r>/wine-d3dmetal/`, an
+- **d3dmetal**: D3DMetal replaces Wine builtins, so mgx runs it from `runtimes/<r>/wine-d3dmetal/`, an
   APFS clone of `wine/` with your GPTK `lib/` folder merged in (the layout of Apple's evaluation
-  environment). It is built on first use and rebuilt when Wine or the GPTK changes. mg never
+  environment). It is built on first use and rebuilt when Wine or the GPTK changes. mgx never
   redistributes D3DMetal.
 - **wined3d**: no copies; all D3D DLLs builtin.
 
@@ -187,13 +189,13 @@ when size or modification time differ, so repeat launches do no I/O.
 auto-detection on `steam.exe` cannot help. Give launcher bottles a backend:
 
 ```sh
-mg battlenet install --bottle ow --backend d3dmetal
-mg battlenet run --bottle ow
+mgx battlenet install --bottle ow --backend d3dmetal
+mgx battlenet run --bottle ow
 ```
 
 ### Per-game overrides
 
-`overrides.json` in the mg root, merged over the built-in table and keyed by executable name
+`overrides.json` in the mgx root, merged over the built-in table and keyed by executable name
 (case-insensitive):
 
 ```json
@@ -259,8 +261,8 @@ Launch tests use a fake `wine` script, so they need no Wine install. CI (`.githu
 also runs a smoke test on `macos-15` against the real Wine artifact from the latest successful
 `Build Wine` run: create a bottle, run `cmd.exe /c echo`, and keep `notepad.exe` up for 30 seconds
 with wined3d. It then installs the DXMT and DXVK-macOS artifacts from the latest successful
-`Build graphics layers` run, checks `mg doctor`, `mg runtime list` and the `--dry-run` plans for the
+`Build graphics layers` run, checks `mgx doctor`, `mgx runtime list` and the `--dry-run` plans for the
 DX11/DX9 fixtures, runs `cmd.exe /c echo` with `--backend dxmt` and `--backend dxvk` (checking the
 DLLs that land in `system32`/`syswow64`), and loads each backend's `d3d11.dll` with `rundll32` under
 `+loaddll` to see which DLLs Wine picks. Nothing is rendered. Steps that need an artifact are skipped
-with a warning when no successful run exists yet. The logs and an `mg report` are uploaded as `smoke-logs`.
+with a warning when no successful run exists yet. The logs and an `mgx report` are uploaded as `smoke-logs`.

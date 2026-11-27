@@ -25,7 +25,7 @@ final class BackendSelectorTests: XCTestCase {
     func testDX12WithoutD3DMetalIsAClearError() {
         XCTAssertThrowsError(try pick(.dx12, open)) { e in
             XCTAssertEqual(e as? MGError, .dx12NeedsD3DMetal("Game.exe"))
-            XCTAssertTrue("\(e)".contains("mg config set gptk"))
+            XCTAssertTrue("\(e)".contains("mgx config set gptk"))
         }
     }
 

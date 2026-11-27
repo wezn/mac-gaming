@@ -7,7 +7,7 @@ extension Backend: ExpressibleByArgument {}
 @main
 struct MG: ParsableCommand {
     static let configuration = CommandConfiguration(
-        commandName: "mg",
+        commandName: "mgx",
         abstract: "Run Windows games on Apple Silicon Macs.",
         version: MG.version,
         subcommands: [Run.self, BottleCommand.self, RuntimeCommand.self, SteamCommand.self, BattlenetCommand.self,
@@ -23,7 +23,7 @@ enum Context {
     static var launcher: Launcher { Launcher(paths: paths) }
 
     static func note(_ s: String) {
-        FileHandle.standardError.write(Data("mg: \(s)\n".utf8))
+        FileHandle.standardError.write(Data("mgx: \(s)\n".utf8))
     }
 }
 
@@ -179,7 +179,7 @@ struct BottleCommand: ParsableCommand {
         @Option(name: .customLong("env"), help: ArgumentHelp("Environment variable (repeatable).", valueName: "KEY=VALUE"))
         var env: [String] = []
         @Flag(help: "Only write bottle.json; Wine creates the prefix on first run.") var noInit = false
-        @Flag(help: "Make this the default bottle for `mg run`.") var setDefault = false
+        @Flag(help: "Make this the default bottle for `mgx run`.") var setDefault = false
 
         func run() throws {
             try guarded {
@@ -199,7 +199,7 @@ struct BottleCommand: ParsableCommand {
                 let paths = Context.paths
                 let config = try GlobalConfig.load(paths)
                 let (bottles, errors) = BottleStore(paths: paths).list()
-                if bottles.isEmpty && errors.isEmpty { print("no bottles (create one with `mg bottle create <name>`)") }
+                if bottles.isEmpty && errors.isEmpty { print("no bottles (create one with `mgx bottle create <name>`)") }
                 for b in bottles {
                     let c = b.config
                     let star = b.name == config.defaultBottle ? "*" : " "
@@ -326,7 +326,7 @@ struct RuntimeCommand: ParsableCommand {
                 let store = RuntimeStore(paths: paths)
                 let def = try? store.resolve(nil, config: GlobalConfig.load(paths)).name
                 let all = store.list()
-                if all.isEmpty { print("no runtimes (install one with `mg runtime install <path>`)") }
+                if all.isEmpty { print("no runtimes (install one with `mgx runtime install <path>`)") }
                 for rt in all {
                     let m = rt.manifest()
                     let parts = ["wine", "dxmt", "dxvk"].compactMap { c in m.components[c].map { "\(c) \($0.version ?? $0.archive)" } }
@@ -372,7 +372,7 @@ struct StoreInstall<S: StoreCommand>: ParsableCommand {
             Context.note("running \(s.installerFileName); log: \(plan.logFile.path)")
             try launcher.prepare(plan, log: { Context.note($0) })
             let code = try launcher.execute(plan)
-            if code == 0 { print("\(s.displayName) installed. Start it with `mg \(s.rawValue) run --bottle \(bottle)`") }
+            if code == 0 { print("\(s.displayName) installed. Start it with `mgx \(s.rawValue) run --bottle \(bottle)`") }
             return code
         }
         if code != 0 { throw ExitCode(code) }
@@ -492,11 +492,11 @@ struct Report: ParsableCommand {
         abstract: "Bundle doctor output, settings and recent logs for a bug report.",
         discussion: """
         Writes a .tar.gz (or a directory, if --output does not end in .tar.gz or .tgz) with host facts,
-        `mg doctor` as text and JSON, config.json, overrides.json, runtime manifests, the D3DMetal overlay
+        `mgx doctor` as text and JSON, config.json, overrides.json, runtime manifests, the D3DMetal overlay
         state, bottle settings and the newest run logs. Your home directory is replaced with ~ and your
         account name with USER. Skim the files before posting them publicly.
         """)
-    @Option(name: .shortAndLong, help: "Output file or directory (default: ./mg-report-<time>.tar.gz).") var output: String?
+    @Option(name: .shortAndLong, help: "Output file or directory (default: ./mgx-report-<time>.tar.gz).") var output: String?
     @Option(help: "How many of the newest logs to include.") var logs = 10
     @Option(help: "Keep only the last N KiB of each log.") var logKib = 512
 
@@ -506,7 +506,7 @@ struct Report: ParsableCommand {
             f.locale = Locale(identifier: "en_US_POSIX")
             f.dateFormat = "yyyyMMdd-HHmmss"
             let stamp = f.string(from: Date())
-            let folder = "mg-report-\(stamp)"
+            let folder = "mgx-report-\(stamp)"
             let out = URL(fileURLWithPath: ((output ?? "\(folder).tar.gz") as NSString).expandingTildeInPath)
             let report = DiagnosticReport.collect(paths: Context.paths, doctor: MGCore.Doctor(paths: Context.paths),
                                                   toolVersion: MG.version, logCount: logs, maxLogBytes: max(1, logKib) * 1024)

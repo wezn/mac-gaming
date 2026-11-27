@@ -10,7 +10,7 @@ public struct GameOverride: Codable, Equatable, Sendable {
     public var env: [String: String]?
     public var retina: Bool?
     public var msync: Bool?
-    /// Free-form note shown by `mg run --dry-run`.
+    /// Free-form note shown by `mgx run --dry-run`.
     public var note: String?
 
     public init(backend: Backend? = nil, dx: DirectXLevel? = nil, env: [String: String]? = nil,

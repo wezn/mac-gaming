@@ -8,11 +8,11 @@ import Glibc
 /// Direct `posix_spawn` of a binary: no shell, no `Process` run loop.
 public enum Subprocess {
     public enum Output: Equatable, Sendable {
-        /// Share mg's stdout/stderr.
+        /// Share mgx's stdout/stderr.
         case inherit
         /// stdout and stderr both go to this file (appended), nothing to the terminal.
         case file(URL)
-        /// stdout and stderr go to the file and are echoed to mg's stderr.
+        /// stdout and stderr go to the file and are echoed to mgx's stderr.
         case tee(URL)
         /// Discard.
         case null
@@ -61,7 +61,7 @@ public enum Subprocess {
         }
         if tee { posix_spawn_file_actions_addclose(&actions, pipeFDs[0]) }
 
-        // Per-spawn chdir (macOS 10.15+, glibc 2.29+): changing mg's own cwd would race in a
+        // Per-spawn chdir (macOS 10.15+, glibc 2.29+): changing mgx's own cwd would race in a
         // multi-threaded front end.
         if let wd = workingDirectory {
             var isDir: ObjCBool = false

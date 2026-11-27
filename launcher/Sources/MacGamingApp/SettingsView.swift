@@ -69,7 +69,7 @@ struct SettingsView: View {
             } header: {
                 Text("Storage")
             } footer: {
-                Text("Shared with the mg command-line tool. Set MG_HOME to use another folder.")
+                Text("Shared with the mgx command-line tool. Set MG_HOME to use another folder.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

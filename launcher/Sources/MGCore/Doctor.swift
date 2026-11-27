@@ -18,7 +18,7 @@ public struct DoctorCheck: Codable, Equatable, Sendable {
     }
 }
 
-/// Environment checks behind `mg doctor`. Host probes are injectable for tests.
+/// Environment checks behind `mgx doctor`. Host probes are injectable for tests.
 public struct Doctor {
     public let paths: MGPaths
     public var environment: [String: String]
@@ -52,7 +52,7 @@ public struct Doctor {
         #endif
     }
 
-    /// The text `mg doctor` prints.
+    /// The text `mgx doctor` prints.
     public static func render(_ checks: [DoctorCheck]) -> String {
         checks.map { c in
             let mark = c.status == .ok ? "✓" : c.status == .warning ? "!" : "✗"
@@ -60,7 +60,7 @@ public struct Doctor {
         }.joined()
     }
 
-    /// `mg doctor --json`: `{"ok": false, "errors": 1, "warnings": 2, "checks": [{"status", "title", "detail"}]}`.
+    /// `mgx doctor --json`: `{"ok": false, "errors": 1, "warnings": 2, "checks": [{"status", "title", "detail"}]}`.
     public static func json(_ checks: [DoctorCheck]) -> String {
         struct Out: Encodable {
             var ok: Bool
@@ -86,12 +86,12 @@ public struct Doctor {
             out.append(.init(.ok, "macOS \(vs)", ""))
         }
         #else
-        out.append(.init(.warning, "not macOS (\(vs))", "mg only runs games on macOS; checks below are for testing"))
+        out.append(.init(.warning, "not macOS (\(vs))", "mgx only runs games on macOS; checks below are for testing"))
         #endif
 
         out.append(machine == "arm64" || machine == "aarch64"
                    ? .init(.ok, "Apple Silicon (\(machine))", "")
-                   : .init(.warning, "CPU \(machine)", "mg targets Apple Silicon Macs"))
+                   : .init(.warning, "CPU \(machine)", "mgx targets Apple Silicon Macs"))
 
         switch rosettaInstalled() {
         case .some(true): out.append(.init(.ok, "Rosetta 2", ""))
@@ -172,7 +172,7 @@ public struct Doctor {
                 out.append(.init(.error, "D3DMetal (GPTK)", "\(p) does not look like a Game Porting Toolkit (no lib/wine/x86_64-windows/d3d12.dll)"))
             }
         } else {
-            out.append(.init(.warning, "D3DMetal not configured", "DX12 games need it: install Apple's Game Porting Toolkit, then `mg config set gptk <path>`"))
+            out.append(.init(.warning, "D3DMetal not configured", "DX12 games need it: install Apple's Game Porting Toolkit, then `mgx config set gptk <path>`"))
         }
 
         let (bottles, errors) = BottleStore(paths: paths).list()

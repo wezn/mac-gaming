@@ -3,7 +3,7 @@ name: Launcher
 on:
   push:
     branches: [main]
-  # Any base branch, so stacked PRs (based on another PR's branch) get CI and an mg build
+  # Any base branch, so stacked PRs (based on another PR's branch) get CI and an mgx build
   # too. Never pull_request_target: this workflow runs PR code.
   pull_request:
   workflow_dispatch:
@@ -48,35 +48,35 @@ jobs:
         env:
           MG_HOME: ${{ runner.temp }}/mg-sanity
         run: |
-          .build/release/mg --version
-          .build/release/mg detect Tests/MGCoreTests/Fixtures/dx12.exe | grep -q "DirectX 12"
+          .build/release/mgx --version
+          .build/release/mgx detect Tests/MGCoreTests/Fixtures/dx12.exe | grep -q "DirectX 12"
           # No runtime installed, so doctor reports an error (exit 1); the JSON must still parse.
-          code=0; .build/release/mg doctor --json > "$RUNNER_TEMP/doctor.json" || code=$?
-          [[ "$code" == 1 ]] || { echo "::error::expected mg doctor to exit 1 on an empty root, got $code"; exit 1; }
+          code=0; .build/release/mgx doctor --json > "$RUNNER_TEMP/doctor.json" || code=$?
+          [[ "$code" == 1 ]] || { echo "::error::expected mgx doctor to exit 1 on an empty root, got $code"; exit 1; }
           python3 -c 'import json, sys; d = json.load(open(sys.argv[1])); assert d["ok"] is False and d["checks"], d' "$RUNNER_TEMP/doctor.json"
-          .build/release/mg report -o "$RUNNER_TEMP/report.tar.gz"
+          .build/release/mgx report -o "$RUNNER_TEMP/report.tar.gz"
           tar -tzf "$RUNNER_TEMP/report.tar.gz" | grep -q '/doctor.json$'
 
       # A ready-to-run binary for testers, so they don't need Xcode. It is unsigned (only the
       # linker's ad-hoc signature): see docs/TESTING.md for the Gatekeeper step. Packed as a
       # tarball because artifact zips drop the executable bit.
-      - name: Package mg
+      - name: Package mgx
         id: package
         run: |
-          bin=.build/release/mg
+          bin=.build/release/mgx
           archs=$(lipo -archs "$bin")
-          [[ "$archs" == *arm64* ]] || { echo "::error::mg is not arm64 ($archs)"; exit 1; }
+          [[ "$archs" == *arm64* ]] || { echo "::error::mgx is not arm64 ($archs)"; exit 1; }
           codesign -dv "$bin" 2>&1 | grep -E '^(Identifier|Signature|CodeDirectory)' || true
-          out="$RUNNER_TEMP/mg-dist"
+          out="$RUNNER_TEMP/mgx-dist"
           mkdir -p "$out"
-          tar -czf "$out/mg-macos-arm64.tar.gz" -C .build/release mg
-          (cd "$out" && shasum -a 256 mg-macos-arm64.tar.gz | tee mg-macos-arm64.tar.gz.sha256)
+          tar -czf "$out/mgx-macos-arm64.tar.gz" -C .build/release mgx
+          (cd "$out" && shasum -a 256 mgx-macos-arm64.tar.gz | tee mgx-macos-arm64.tar.gz.sha256)
           echo "dir=$out" >> "$GITHUB_OUTPUT"
 
-      - name: Upload mg binary
+      - name: Upload mgx binary
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: mg-macos-arm64
+          name: mgx-macos-arm64
           path: ${{ steps.package.outputs.dir }}
           if-no-files-found: error
           retention-days: 30
@@ -98,10 +98,10 @@ jobs:
           path: launcher/.build
           key: spm-app-${{ runner.os }}-${{ hashFiles('launcher/Package.resolved') }}
 
-      - name: Build mg and MacGaming.app
+      - name: Build mgx and MacGaming.app
         working-directory: launcher
         run: |
-          swift build -c release --product mg
+          swift build -c release --product mgx
           BUILD_NUMBER="$GITHUB_RUN_NUMBER" Scripts/make_app.sh
 
       - name: Inspect the bundle
@@ -114,11 +114,11 @@ jobs:
           file "$app/Contents/MacOS/MacGaming"
           test -x "$app/Contents/MacOS/MacGaming"
 
-      - name: Seed a demo mg root
+      - name: Seed a demo mgx root
         run: |
           echo "MG_HOME=$RUNNER_TEMP/mg-demo" >> "$GITHUB_ENV"
           export MG_HOME="$RUNNER_TEMP/mg-demo"
-          mg=launcher/.build/release/mg
+          mg=launcher/.build/release/mgx
           # A fake runtime (wine just exits): enough for planning and for the UI to have content.
           rt="$RUNNER_TEMP/demo-runtime"
           mkdir -p "$rt/wine/bin" "$rt/wine/lib" "$rt/dxmt/x86_64-windows" "$rt/dxmt/i386-windows" \
@@ -191,7 +191,7 @@ jobs:
           if-no-files-found: ignore
 
   smoke:
-    # Runs mg against the real Wine build from the latest successful "Build Wine" run and the
+    # Runs mgx against the real Wine build from the latest successful "Build Wine" run and the
     # real DXMT / DXVK-macOS builds from the latest successful "Build graphics layers" run.
     name: Smoke test with real Wine
     needs: test
@@ -208,7 +208,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Use a throwaway mg root
+      - name: Use a throwaway mgx root
         run: echo "MG_HOME=$RUNNER_TEMP/mg" >> "$GITHUB_ENV"
 
       - name: Ensure Rosetta 2
@@ -220,7 +220,7 @@ jobs:
           path: launcher/.build
           key: spm-${{ runner.os }}-${{ hashFiles('launcher/Package.resolved') }}
 
-      - name: Build mg
+      - name: Build mgx
         working-directory: launcher
         run: swift build -c release
 
@@ -244,7 +244,7 @@ jobs:
       - name: Install runtime and create a bottle
         if: steps.wine.outputs.found == 'true'
         run: |
-          mg=launcher/.build/release/mg
+          mg=launcher/.build/release/mgx
           $mg runtime install "$RUNNER_TEMP/wine-artifact"
           $mg runtime list
           $mg bottle create test
@@ -254,7 +254,7 @@ jobs:
       - name: Run a console program
         if: steps.wine.outputs.found == 'true'
         run: |
-          mg=launcher/.build/release/mg
+          mg=launcher/.build/release/mgx
           $mg run --bottle test --backend wined3d cmd.exe /c echo mg-smoke-ok
           $mg logs --last
           $mg logs --last | grep -q mg-smoke-ok
@@ -266,7 +266,7 @@ jobs:
           # GnuTLS. Without it they say "no internet". Each URL is fetched natively with curl first:
           # a URL the runner itself cannot reach (blocked datacenter IPs) is not held against Wine.
           # Any HTTP status means the TLS handshake worked.
-          mg=launcher/.build/release/mg
+          mg=launcher/.build/release/mgx
           # Not www.battle.net: it redirects to "https://shop.battle.net?from=root" (no "/" before "?"),
           # which Wine's WinHTTP resolves as host "shop.battle.net?from=root" and fails on DNS.
           urls=(https://store.steampowered.com/ https://us.battle.net/ https://oauth.battle.net/
@@ -318,7 +318,7 @@ jobs:
       - name: Run notepad.exe headlessly
         if: steps.wine.outputs.found == 'true'
         run: |
-          mg=launcher/.build/release/mg
+          mg=launcher/.build/release/mgx
           $mg run --bottle test --backend wined3d notepad.exe &
           pid=$!
           # notepad never exits on its own, so "still running after 30 s" means it started and
@@ -335,7 +335,7 @@ jobs:
           $mg logs --last
           if [[ "$alive" != true ]]; then
             code=0; wait "$pid" || code=$?
-            echo "::error::notepad.exe exited early (mg exit code $code)"; exit 1
+            echo "::error::notepad.exe exited early (mgx exit code $code)"; exit 1
           fi
 
       - name: Download the latest DXMT and DXVK artifacts
@@ -365,19 +365,19 @@ jobs:
       - name: Install DXMT and DXVK
         if: steps.gfx.outputs.found == 'true'
         run: |
-          mg=launcher/.build/release/mg
+          mg=launcher/.build/release/mgx
           # Graphics-only install: goes into the default runtime installed above.
           $mg runtime install "$RUNNER_TEMP/gfx-artifact"
           $mg runtime list | tee "$RUNNER_TEMP/runtime-list.txt"
-          grep -Eq '^\* .*dxmt [0-9]' "$RUNNER_TEMP/runtime-list.txt" || { echo "::error::mg runtime list shows no DXMT"; exit 1; }
-          grep -Eq '^\* .*dxvk [0-9]' "$RUNNER_TEMP/runtime-list.txt" || { echo "::error::mg runtime list shows no DXVK"; exit 1; }
+          grep -Eq '^\* .*dxmt [0-9]' "$RUNNER_TEMP/runtime-list.txt" || { echo "::error::mgx runtime list shows no DXMT"; exit 1; }
+          grep -Eq '^\* .*dxvk [0-9]' "$RUNNER_TEMP/runtime-list.txt" || { echo "::error::mgx runtime list shows no DXVK"; exit 1; }
 
           $mg doctor | tee "$RUNNER_TEMP/doctor.txt" || true # warnings (no GPTK) are expected
-          grep -q 'winemetal integrated' "$RUNNER_TEMP/doctor.txt" || { echo "::error::mg doctor: DXMT's winemetal is not integrated"; exit 1; }
-          grep -Eq '^✓ runtime .*: DXMT [0-9]' "$RUNNER_TEMP/doctor.txt" || { echo "::error::mg doctor: DXMT not OK"; exit 1; }
-          grep -Eq '^✓ runtime .*: DXVK [0-9]' "$RUNNER_TEMP/doctor.txt" || { echo "::error::mg doctor: DXVK not OK"; exit 1; }
+          grep -q 'winemetal integrated' "$RUNNER_TEMP/doctor.txt" || { echo "::error::mgx doctor: DXMT's winemetal is not integrated"; exit 1; }
+          grep -Eq '^✓ runtime .*: DXMT [0-9]' "$RUNNER_TEMP/doctor.txt" || { echo "::error::mgx doctor: DXMT not OK"; exit 1; }
+          grep -Eq '^✓ runtime .*: DXVK [0-9]' "$RUNNER_TEMP/doctor.txt" || { echo "::error::mgx doctor: DXVK not OK"; exit 1; }
           if grep -q 'DXMT built for another Wine' "$RUNNER_TEMP/doctor.txt"; then
-            echo "::warning::DXMT was built against a different Wine than the Build Wine artifact (see mg doctor)"
+            echo "::warning::DXMT was built against a different Wine than the Build Wine artifact (see mgx doctor)"
           fi
 
           # The files themselves: DXMT merged into wine-dxmt/, wine/ left stock.
@@ -395,7 +395,7 @@ jobs:
       - name: Dry runs against the DX11 / DX9 fixtures
         if: steps.gfx.outputs.found == 'true'
         run: |
-          mg=launcher/.build/release/mg
+          mg=launcher/.build/release/mgx
           fx=launcher/Tests/MGCoreTests/Fixtures
           fail() { echo "::error::$*"; exit 1; }
 
@@ -428,14 +428,14 @@ jobs:
         if: steps.gfx.outputs.found == 'true'
         timeout-minutes: 15
         run: |
-          mg=launcher/.build/release/mg
+          mg=launcher/.build/release/mgx
           b="$MG_HOME/bottles/test/drive_c/windows"
           fail() { echo "::error::$*"; $mg logs --last || true; exit 1; }
           # A hang fails fast (macOS has no timeout(1); the alarm survives exec).
           t() { perl -e 'alarm shift; exec @ARGV or die "exec: $!"' 300 "$@"; }
 
           # DXMT: wine-dxmt/ runs, winemetal.dll lands in the prefix, everything else stays builtin.
-          t $mg run --bottle test --backend dxmt cmd.exe /c echo mg-dxmt-ok || fail "mg run --backend dxmt exited $?"
+          t $mg run --bottle test --backend dxmt cmd.exe /c echo mg-dxmt-ok || fail "mgx run --backend dxmt exited $?"
           $mg logs --last | tee "$RUNNER_TEMP/run.log"
           grep -q mg-dxmt-ok "$RUNNER_TEMP/run.log" || fail "no cmd.exe output in the DXMT run log"
           grep -q "^# command: $RT/wine-dxmt/bin/wine " "$RUNNER_TEMP/run.log" || fail "DXMT run did not use wine-dxmt/"
@@ -443,7 +443,7 @@ jobs:
           cmp "$RT/dxmt/i386-windows/winemetal.dll" "$b/syswow64/winemetal.dll" || fail "syswow64/winemetal.dll is not DXMT's"
 
           # DXVK: native DLLs land in system32 (x64) and syswow64 (x32).
-          t $mg run --bottle test --backend dxvk cmd.exe /c echo mg-dxvk-ok || fail "mg run --backend dxvk exited $?"
+          t $mg run --bottle test --backend dxvk cmd.exe /c echo mg-dxvk-ok || fail "mgx run --backend dxvk exited $?"
           $mg logs --last | tee "$RUNNER_TEMP/run.log"
           grep -q mg-dxvk-ok "$RUNNER_TEMP/run.log" || fail "no cmd.exe output in the DXVK run log"
           for d in d3d9 d3d10core d3d11 dxgi; do
@@ -452,7 +452,7 @@ jobs:
           done
 
           # Back to wined3d in the same bottle: DXVK's copies stay on disk but are pinned to builtin.
-          t $mg run --bottle test --backend wined3d cmd.exe /c echo mg-wined3d-ok || fail "mg run --backend wined3d exited $?"
+          t $mg run --bottle test --backend wined3d cmd.exe /c echo mg-wined3d-ok || fail "mgx run --backend wined3d exited $?"
           $mg logs --last | grep -q mg-wined3d-ok || fail "no cmd.exe output in the wined3d run log"
 
       - name: Load each backend's d3d11.dll (no device, no rendering)
@@ -461,7 +461,7 @@ jobs:
         run: |
           # rundll32 loads the DLL (and its imports) and then finds no such entry point, so this
           # proves which d3d11.dll Wine picks without creating a device. +loaddll lists every load.
-          mg=launcher/.build/release/mg
+          mg=launcher/.build/release/mgx
           fail() { echo "::error::$*"; exit 1; }
           t() { perl -e 'alarm shift; exec @ARGV or die "exec: $!"' 300 "$@"; }
           for rundll in rundll32.exe 'C:\windows\syswow64\rundll32.exe'; do
@@ -481,15 +481,15 @@ jobs:
       - name: Diagnostics report
         if: always() && steps.wine.outputs.found == 'true'
         run: |
-          mg=launcher/.build/release/mg
+          mg=launcher/.build/release/mgx
           $mg doctor --json || true
-          $mg report -o "$RUNNER_TEMP/mg/mg-report"
-          find "$RUNNER_TEMP/mg/mg-report" -type f | sort
-          cat "$RUNNER_TEMP/mg/mg-report/runtimes.txt"
+          $mg report -o "$RUNNER_TEMP/mg/mgx-report"
+          find "$RUNNER_TEMP/mg/mgx-report" -type f | sort
+          cat "$RUNNER_TEMP/mg/mgx-report/runtimes.txt"
           if [[ "${{ steps.gfx.outputs.found }}" == true ]]; then
-            grep -q '^present: DXMT overlay winemetal.so' "$RUNNER_TEMP/mg/mg-report/runtimes.txt" || { echo "::error::mg report does not show the wine-dxmt overlay"; exit 1; }
+            grep -q '^present: DXMT overlay winemetal.so' "$RUNNER_TEMP/mg/mgx-report/runtimes.txt" || { echo "::error::mgx report does not show the wine-dxmt overlay"; exit 1; }
           fi
-          tar -czf "$RUNNER_TEMP/mg/mg-report.tar.gz" -C "$RUNNER_TEMP/mg" mg-report
+          tar -czf "$RUNNER_TEMP/mg/mgx-report.tar.gz" -C "$RUNNER_TEMP/mg" mgx-report
 
       - name: Upload logs
         if: always() && steps.wine.outputs.found == 'true'
@@ -498,5 +498,5 @@ jobs:
           name: smoke-logs
           path: |
             ${{ runner.temp }}/mg/logs
-            ${{ runner.temp }}/mg/mg-report.tar.gz
+            ${{ runner.temp }}/mg/mgx-report.tar.gz
           if-no-files-found: ignore
