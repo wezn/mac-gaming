@@ -516,11 +516,11 @@ if $HAS_DXMT && step "DXMT DLL deploy" \
     say "PROBLEM: no runtimes/*/wine-dxmt overlay was built"
   fi
   log=$("$MG" logs --bottle mgdxmt --last 2>/dev/null || true)
-  ovr=$(printf '%s\n' "$log" | grep -m1 'WINEDLLOVERRIDES=' || true)
+  ovr=$(grep -m1 'WINEDLLOVERRIDES=' <<<"$log" || true)
   say "overrides: ${ovr:-not in the log}"
   if [[ "$ovr" == *"n,b"* ]]; then say "PROBLEM: DXMT run has n,b overrides (expected everything builtin)"; else say "ok: no n,b overrides"; fi
-  if printf '%s\n' "$log" | grep -iE 'loaddll.*winemetal\.dll.*builtin' >/dev/null; then say "ok: winemetal.dll loaded as builtin"; else say "PROBLEM: winemetal.dll did not load as builtin, so d3d11.dll is probably not DXMT's"; fi
-  if printf '%s\n' "$log" | grep -iE 'loaddll.*wined3d\.dll' >/dev/null; then say "PROBLEM: wined3d.dll loaded (Wine's own d3d11)"; else say "ok: wined3d.dll not loaded"; fi
+  if grep -iE 'loaddll.*winemetal\.dll.*builtin' >/dev/null <<<"$log"; then say "ok: winemetal.dll loaded as builtin"; else say "PROBLEM: winemetal.dll did not load as builtin, so d3d11.dll is probably not DXMT's"; fi
+  if grep -iE 'loaddll.*wined3d\.dll' >/dev/null <<<"$log"; then say "PROBLEM: wined3d.dll loaded (Wine's own d3d11)"; else say "ok: wined3d.dll not loaded"; fi
   outcome "Were all lines above 'ok:' (winemetal.dll builtin, wine-dxmt files are DXMT's, no n,b)?"
 fi
 
