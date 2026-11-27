@@ -7,17 +7,23 @@ on:
         description: CrossOver source version (see codeweavers.com/crossover/source)
         required: true
         default: "26.3.0"
+  # workflow_dispatch only works once this file is on the default branch.
+  push:
+    branches: [wine-build-ci]
+    paths: [scripts/build-wine.sh, .github/workflows/build-wine.yml]
 
 jobs:
   build:
     # Self-hosted M4 Max. Keep this repo PRIVATE: on a public repo, fork PRs could run code on your Mac.
     runs-on: [self-hosted, macOS, ARM64]
     timeout-minutes: 120
+    env:
+      CX_VERSION: ${{ inputs.crossover_version || '26.3.0' }}
     steps:
       - uses: actions/checkout@v4
       - name: Build
-        run: scripts/build-wine.sh "${{ inputs.crossover_version }}"
+        run: scripts/build-wine.sh "$CX_VERSION"
       - uses: actions/upload-artifact@v4
         with:
-          name: wine-crossover-${{ inputs.crossover_version }}-wow64
+          name: wine-crossover-${{ env.CX_VERSION }}-wow64
           path: build/dist/*.tar.xz
