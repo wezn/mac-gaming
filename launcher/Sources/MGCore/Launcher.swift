@@ -127,8 +127,8 @@ public struct Launcher {
     /// Makes the bottle match the plan: prefix initialised, backend files in place, Retina applied.
     /// Each step is skipped when already done, so a repeat launch only stats a few files.
     public func prepare(_ plan: LaunchPlan, output: Subprocess.Output = .null, log: (String) -> Void = { _ in }) throws {
-        if plan.setup.backend == .dxmt, !BackendFiles.isDXMTIntegrated(plan.runtime) {
-            try BackendFiles.integrateDXMT(into: plan.runtime)
+        if plan.setup.backend == .dxmt, try BackendFiles.ensureDXMTOverlay(runtime: plan.runtime) {
+            log("built \(plan.runtime.dxmtWineRoot.path) (Wine with DXMT merged in)")
         }
         if let gptk = plan.setup.gptk, try BackendFiles.ensureD3DMetalOverlay(runtime: plan.runtime, gptk: gptk) {
             log("built D3DMetal overlay from \(gptk.libRoot.path)")

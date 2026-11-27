@@ -3,8 +3,9 @@ name: Launcher
 on:
   push:
     branches: [main]
+  # Any base branch, so stacked PRs (based on another PR's branch) get CI too. Never
+  # pull_request_target: this workflow runs PR code.
   pull_request:
-    branches: [main]
 
 # Least privilege: jobs only read the repo unless they say otherwise.
 permissions:
@@ -48,14 +49,18 @@ jobs:
           .build/release/mg detect Tests/MGCoreTests/Fixtures/dx12.exe | grep -q "DirectX 12"
 
   smoke:
-    # Runs mg against the real Wine build from the latest successful "Build Wine" run.
+    # Runs mg against the real Wine build from the latest successful "Build Wine" run and the
+    # real DXMT / DXVK-macOS builds from the latest successful "Build graphics layers" run.
     name: Smoke test with real Wine
     needs: test
     runs-on: macos-15
-    timeout-minutes: 30
+    timeout-minutes: 45
     permissions:
       contents: read
-      actions: read # download the artifact of another workflow run
+      actions: read # download the artifacts of other workflow runs
+    defaults:
+      run:
+        shell: bash # -eo pipefail
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -83,7 +88,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
         run: |
-          run_id=$(gh run list --repo "$REPO" --workflow build-wine.yml --status success --limit 1 --json databaseId --jq '.[0].databaseId')
+          run_id=$(gh run list --repo "$REPO" --workflow build-wine.yml --status success --limit 1 --json databaseId --jq '.[0].databaseId // empty')
           if [[ -z "$run_id" ]]; then
             echo "::warning::No successful Build Wine run yet; skipping the smoke test"
             echo "found=false" >> "$GITHUB_OUTPUT"
@@ -134,6 +139,146 @@ jobs:
             code=0; wait "$pid" || code=$?
             echo "::error::notepad.exe exited early (mg exit code $code)"; exit 1
           fi
+
+      - name: Download the latest DXMT and DXVK artifacts
+        id: gfx
+        if: steps.wine.outputs.found == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          # gh exits non-zero if the workflow does not exist (yet) on this repo.
+          run_id=$(gh run list --repo "$REPO" --workflow build-graphics.yml --status success --limit 1 --json databaseId --jq '.[0].databaseId // empty' || true)
+          if [[ -z "$run_id" ]]; then
+            echo "::warning::No successful Build graphics layers run yet; skipping the DXMT/DXVK smoke test"
+            echo "found=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "Using Build graphics layers run $run_id"
+          # One folder per artifact: dxmt-<v>/dxmt-<v>.tar.xz, dxvk-macos-<v>/dxvk-macos-<v>.tar.xz.
+          gh run download "$run_id" --repo "$REPO" --pattern 'dxmt-*' --pattern 'dxvk-macos-*' --dir "$RUNNER_TEMP/gfx-artifact"
+          ls -lR "$RUNNER_TEMP/gfx-artifact"
+          for p in 'dxmt-*.tar.xz' 'dxvk-macos-*.tar.xz'; do
+            n=$(find "$RUNNER_TEMP/gfx-artifact" -name "$p" | wc -l)
+            if (( n != 1 )); then echo "::error::expected one $p in run $run_id, found $n"; exit 1; fi
+          done
+          echo "found=true" >> "$GITHUB_OUTPUT"
+
+      - name: Install DXMT and DXVK
+        if: steps.gfx.outputs.found == 'true'
+        run: |
+          mg=launcher/.build/release/mg
+          # Graphics-only install: goes into the default runtime installed above.
+          $mg runtime install "$RUNNER_TEMP/gfx-artifact"
+          $mg runtime list | tee "$RUNNER_TEMP/runtime-list.txt"
+          grep -Eq '^\* .*dxmt [0-9]' "$RUNNER_TEMP/runtime-list.txt" || { echo "::error::mg runtime list shows no DXMT"; exit 1; }
+          grep -Eq '^\* .*dxvk [0-9]' "$RUNNER_TEMP/runtime-list.txt" || { echo "::error::mg runtime list shows no DXVK"; exit 1; }
+
+          $mg doctor | tee "$RUNNER_TEMP/doctor.txt" || true # warnings (no GPTK) are expected
+          grep -q 'winemetal integrated' "$RUNNER_TEMP/doctor.txt" || { echo "::error::mg doctor: DXMT's winemetal is not integrated"; exit 1; }
+          grep -Eq '^✓ runtime .*: DXMT [0-9]' "$RUNNER_TEMP/doctor.txt" || { echo "::error::mg doctor: DXMT not OK"; exit 1; }
+          grep -Eq '^✓ runtime .*: DXVK [0-9]' "$RUNNER_TEMP/doctor.txt" || { echo "::error::mg doctor: DXVK not OK"; exit 1; }
+          if grep -q 'DXMT built for another Wine' "$RUNNER_TEMP/doctor.txt"; then
+            echo "::warning::DXMT was built against a different Wine than the Build Wine artifact (see mg doctor)"
+          fi
+
+          # The files themselves: DXMT merged into wine-dxmt/, wine/ left stock.
+          rt=$(dirname "$(find "$MG_HOME/runtimes" -mindepth 2 -maxdepth 2 -name dxmt -type d)")
+          echo "RT=$rt" >> "$GITHUB_ENV"
+          for f in x86_64-windows/d3d11.dll x86_64-windows/dxgi.dll x86_64-windows/d3d10core.dll x86_64-windows/winemetal.dll \
+                   i386-windows/d3d11.dll i386-windows/dxgi.dll i386-windows/d3d10core.dll i386-windows/winemetal.dll \
+                   x86_64-unix/winemetal.so; do
+            cmp "$rt/dxmt/$f" "$rt/wine-dxmt/lib/wine/$f"
+          done
+          if [[ -e "$rt/wine/lib/wine/x86_64-unix/winemetal.so" ]] || cmp -s "$rt/dxmt/x86_64-windows/d3d11.dll" "$rt/wine/lib/wine/x86_64-windows/d3d11.dll"; then
+            echo "::error::DXMT leaked into the stock wine/ tree"; exit 1
+          fi
+
+      - name: Dry runs against the DX11 / DX9 fixtures
+        if: steps.gfx.outputs.found == 'true'
+        run: |
+          mg=launcher/.build/release/mg
+          fx=launcher/Tests/MGCoreTests/Fixtures
+          fail() { echo "::error::$*"; exit 1; }
+
+          for args in "--backend dxmt $fx/dx11.exe" "$fx/dx11.exe"; do
+            # shellcheck disable=SC2086 # word splitting intended
+            $mg run --bottle test --dry-run $args | tee "$RUNNER_TEMP/plan.txt"
+            grep -q '^backend:   dxmt ' "$RUNNER_TEMP/plan.txt" || fail "dx11.exe ($args) did not plan DXMT"
+            grep -q '^detected:  DirectX 11' "$RUNNER_TEMP/plan.txt" || fail "dx11.exe not detected as DirectX 11"
+            grep -q "^command:   $RT/wine-dxmt/bin/wine " "$RUNNER_TEMP/plan.txt" || fail "DXMT does not run from wine-dxmt/"
+            [[ "$(grep -c '^copy:' "$RUNNER_TEMP/plan.txt")" == 2 ]] || fail "DXMT should copy exactly 2 DLLs"
+            grep -q "^copy:      $RT/dxmt/x86_64-windows/winemetal.dll -> $MG_HOME/bottles/test/drive_c/windows/system32/winemetal.dll$" "$RUNNER_TEMP/plan.txt" || fail "64-bit winemetal copy missing"
+            grep -q "^copy:      $RT/dxmt/i386-windows/winemetal.dll -> $MG_HOME/bottles/test/drive_c/windows/syswow64/winemetal.dll$" "$RUNNER_TEMP/plan.txt" || fail "32-bit winemetal copy missing"
+            grep -qx '  WINEDLLOVERRIDES=d3d10,d3d10_1,d3d10core,d3d11,d3d12,d3d12core,d3d8,d3d9,dxgi,winemetal=b' "$RUNNER_TEMP/plan.txt" || fail "unexpected DXMT WINEDLLOVERRIDES"
+          done
+
+          for args in "--backend dxvk $fx/dx9.exe" "$fx/dx9.exe" "--backend dxvk $fx/dx11.exe"; do
+            # shellcheck disable=SC2086
+            $mg run --bottle test --dry-run $args | tee "$RUNNER_TEMP/plan.txt"
+            grep -q '^backend:   dxvk ' "$RUNNER_TEMP/plan.txt" || fail "$args did not plan DXVK"
+            grep -q "^command:   $RT/wine/bin/wine " "$RUNNER_TEMP/plan.txt" || fail "DXVK does not run from stock wine/"
+            for d in d3d9 d3d10core d3d11 dxgi; do
+              grep -q "^copy:      $RT/dxvk/x64/$d.dll -> $MG_HOME/bottles/test/drive_c/windows/system32/$d.dll$" "$RUNNER_TEMP/plan.txt" || fail "x64/$d.dll copy missing"
+              grep -q "^copy:      $RT/dxvk/x32/$d.dll -> $MG_HOME/bottles/test/drive_c/windows/syswow64/$d.dll$" "$RUNNER_TEMP/plan.txt" || fail "x32/$d.dll copy missing"
+            done
+            grep -qx '  WINEDLLOVERRIDES=d3d10,d3d10_1,d3d12,d3d12core,d3d8=b;d3d10core,d3d11,d3d9,dxgi=n,b' "$RUNNER_TEMP/plan.txt" || fail "unexpected DXVK WINEDLLOVERRIDES"
+          done
+          grep -q '^detected:  DirectX 9' <($mg run --bottle test --dry-run "$fx/dx9.exe") || fail "dx9.exe not detected as DirectX 9"
+
+      - name: Run with DXMT and DXVK (no rendering)
+        if: steps.gfx.outputs.found == 'true'
+        timeout-minutes: 15
+        run: |
+          mg=launcher/.build/release/mg
+          b="$MG_HOME/bottles/test/drive_c/windows"
+          fail() { echo "::error::$*"; $mg logs --last || true; exit 1; }
+          # A hang fails fast (macOS has no timeout(1); the alarm survives exec).
+          t() { perl -e 'alarm shift; exec @ARGV or die "exec: $!"' 300 "$@"; }
+
+          # DXMT: wine-dxmt/ runs, winemetal.dll lands in the prefix, everything else stays builtin.
+          t $mg run --bottle test --backend dxmt cmd.exe /c echo mg-dxmt-ok || fail "mg run --backend dxmt exited $?"
+          $mg logs --last | tee "$RUNNER_TEMP/run.log"
+          grep -q mg-dxmt-ok "$RUNNER_TEMP/run.log" || fail "no cmd.exe output in the DXMT run log"
+          grep -q "^# command: $RT/wine-dxmt/bin/wine " "$RUNNER_TEMP/run.log" || fail "DXMT run did not use wine-dxmt/"
+          cmp "$RT/dxmt/x86_64-windows/winemetal.dll" "$b/system32/winemetal.dll" || fail "system32/winemetal.dll is not DXMT's"
+          cmp "$RT/dxmt/i386-windows/winemetal.dll" "$b/syswow64/winemetal.dll" || fail "syswow64/winemetal.dll is not DXMT's"
+
+          # DXVK: native DLLs land in system32 (x64) and syswow64 (x32).
+          t $mg run --bottle test --backend dxvk cmd.exe /c echo mg-dxvk-ok || fail "mg run --backend dxvk exited $?"
+          $mg logs --last | tee "$RUNNER_TEMP/run.log"
+          grep -q mg-dxvk-ok "$RUNNER_TEMP/run.log" || fail "no cmd.exe output in the DXVK run log"
+          for d in d3d9 d3d10core d3d11 dxgi; do
+            cmp "$RT/dxvk/x64/$d.dll" "$b/system32/$d.dll" || fail "system32/$d.dll is not DXVK's"
+            cmp "$RT/dxvk/x32/$d.dll" "$b/syswow64/$d.dll" || fail "syswow64/$d.dll is not DXVK's"
+          done
+
+          # Back to wined3d in the same bottle: DXVK's copies stay on disk but are pinned to builtin.
+          t $mg run --bottle test --backend wined3d cmd.exe /c echo mg-wined3d-ok || fail "mg run --backend wined3d exited $?"
+          $mg logs --last | grep -q mg-wined3d-ok || fail "no cmd.exe output in the wined3d run log"
+
+      - name: Load each backend's d3d11.dll (no device, no rendering)
+        if: steps.gfx.outputs.found == 'true'
+        timeout-minutes: 10
+        run: |
+          # rundll32 loads the DLL (and its imports) and then finds no such entry point, so this
+          # proves which d3d11.dll Wine picks without creating a device. +loaddll lists every load.
+          mg=launcher/.build/release/mg
+          fail() { echo "::error::$*"; exit 1; }
+          t() { perl -e 'alarm shift; exec @ARGV or die "exec: $!"' 300 "$@"; }
+          for rundll in rundll32.exe 'C:\windows\syswow64\rundll32.exe'; do
+            t $mg run --bottle test --backend dxmt --debug +loaddll "$rundll" d3d11.dll,mgNoSuchEntry || true
+            $mg logs --last > "$RUNNER_TEMP/load.log"
+            grep -iE 'loaddll.*(d3d11|winemetal|wined3d)' "$RUNNER_TEMP/load.log" || true
+            grep -iqE 'loaddll.*winemetal\.dll.*builtin' "$RUNNER_TEMP/load.log" || fail "[$rundll] DXMT: winemetal.dll was not loaded, so d3d11.dll is not DXMT's"
+            if grep -iq 'loaddll.*wined3d\.dll' "$RUNNER_TEMP/load.log"; then fail "[$rundll] DXMT: Wine's own d3d11 (wined3d) was loaded"; fi
+
+            t $mg run --bottle test --backend dxvk --debug +loaddll "$rundll" d3d11.dll,mgNoSuchEntry || true
+            $mg logs --last > "$RUNNER_TEMP/load.log"
+            grep -iE 'loaddll.*(d3d11|dxgi|wined3d)' "$RUNNER_TEMP/load.log" || true
+            grep -iqE 'loaddll.*d3d11\.dll.*native' "$RUNNER_TEMP/load.log" || fail "[$rundll] DXVK: d3d11.dll was not loaded as native"
+            if grep -iq 'loaddll.*wined3d\.dll' "$RUNNER_TEMP/load.log"; then fail "[$rundll] DXVK: Wine's own d3d11 (wined3d) was loaded"; fi
+          done
 
       - name: Upload logs
         if: always() && steps.wine.outputs.found == 'true'

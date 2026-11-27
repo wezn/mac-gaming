@@ -24,7 +24,7 @@ macOS 13+ is required at run time. macOS 15+ is recommended: Rosetta 2 translate
 # 1. Install the Wine build (and optionally graphics backends). Pass files, zipped CI
 #    artifacts, or a directory containing them.
 mg runtime install ~/Downloads/wine-crossover-26.3.0-wow64.tar.xz \
-                   ~/Downloads/dxmt-0.61.tar.xz ~/Downloads/dxvk-macos-1.10.3.tar.xz
+                   ~/Downloads/dxmt-0.80.tar.xz ~/Downloads/dxvk-macos-1.10.3-20230507-repack.tar.xz
 
 # 2. Optional: point mg at your own Game Porting Toolkit for D3DMetal (needed for DX12).
 mg config set gptk "/Volumes/Evaluation environment for Windows games 2.1"
@@ -106,9 +106,13 @@ run time).
 
 How each backend is wired:
 
-- **dxmt**: `winemetal.dll`/`winemetal.so` are copied into the runtime's Wine tree (their names are
-  DXMT's own, so other backends are unaffected). `d3d11`, `dxgi` and `d3d10core` are copied into the
-  bottle's `system32` (64-bit) and `syswow64` (32-bit) and set to `n,b`.
+- **dxmt**: DXMT's DLLs are Wine *builtins* linked against one Wine build (`dxmt/VERSION` says which;
+  `mg doctor` warns on a mismatch). Wine loads builtins from its own `lib/wine` even when a copy sits
+  in `system32`, so mg runs DXMT from `runtimes/<r>/wine-dxmt/`: an APFS clone of `wine/` with DXMT's
+  `x86_64-windows/*.dll`, `i386-windows/*.dll` and `x86_64-unix/winemetal.so` merged into `lib/wine`.
+  It is built by `mg runtime install` and rebuilt when Wine or DXMT changes. Every D3D DLL stays
+  builtin (no `n,b`). `winemetal.dll` is copied into the bottle's `system32`/`syswow64`, because
+  `wineboot` does not put it there. `wine/` stays stock for wined3d and DXVK bottles.
 - **dxvk**: `x64/*.dll` → `system32`, `x32/*.dll` → `syswow64`, all `n,b`.
 - **d3dmetal**: D3DMetal replaces Wine builtins, so mg runs it from `runtimes/<r>/wine-d3dmetal/`, an
   APFS clone of `wine/` with your GPTK `lib/` folder merged in (the layout of Apple's evaluation
@@ -153,7 +157,7 @@ Everything lives under `~/Library/Application Support/mac-gaming` (set `MG_HOME`
 ```
 config.json                 default runtime / bottle, GPTK path
 overrides.json              your per-game overrides
-runtimes/<name>/            wine/, dxmt/, dxvk/, wine-d3dmetal/ (generated), runtime.json
+runtimes/<name>/            wine/, dxmt/, dxvk/, wine-dxmt/ and wine-d3dmetal/ (generated), runtime.json
 bottles/<name>/             the Wine prefix (drive_c, *.reg) plus bottle.json
 logs/<bottle>/<time>-<exe>.log   one per run, newest 50 kept per bottle
 cache/installers/           SteamSetup.exe, Battle.net-Setup.exe
@@ -195,4 +199,9 @@ synthetic images made by `Scripts/make_fixtures.py` (cross-checked with the `pef
 Launch tests use a fake `wine` script, so they need no Wine install. CI (`.github/workflows/launcher.yml`)
 also runs a smoke test on `macos-15` against the real Wine artifact from the latest successful
 `Build Wine` run: create a bottle, run `cmd.exe /c echo`, and keep `notepad.exe` up for 30 seconds
-with wined3d.
+with wined3d. It then installs the DXMT and DXVK-macOS artifacts from the latest successful
+`Build graphics layers` run, checks `mg doctor`, `mg runtime list` and the `--dry-run` plans for the
+DX11/DX9 fixtures, runs `cmd.exe /c echo` with `--backend dxmt` and `--backend dxvk` (checking the
+DLLs that land in `system32`/`syswow64`), and loads each backend's `d3d11.dll` with `rundll32` under
+`+loaddll` to see which DLLs Wine picks. Nothing is rendered. Steps that need an artifact are skipped
+with a warning when no successful run exists yet.

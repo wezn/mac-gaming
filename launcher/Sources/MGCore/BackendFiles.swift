@@ -69,8 +69,8 @@ public enum BackendFiles {
         var setup = BackendSetup(backend: backend, wineRoot: runtime.wineRoot, copies: [], overrides: overrides,
                                  libraryDirs: [], env: [:], gptk: nil)
 
-        func native(_ dir: URL, to dest: URL, skipping skip: Set<String> = []) {
-            for name in runtime.dlls(in: dir) where !skip.contains(name.lowercased()) {
+        func native(_ dir: URL, to dest: URL) {
+            for name in runtime.dlls(in: dir) {
                 setup.copies.append(DLLCopy(source: dir.appendingPathComponent(name), destination: dest.appendingPathComponent(name.lowercased())))
                 setup.overrides.set(name, "n,b")
             }
@@ -80,10 +80,18 @@ public enum BackendFiles {
         case .auto, .wined3d:
             break
         case .dxmt:
-            // winemetal is a Wine builtin with a Unix side; it lives in the Wine tree (integrateDXMT).
-            native(runtime.dxmtRoot.appendingPathComponent("x86_64-windows"), to: system32(prefix), skipping: ["winemetal.dll"])
-            native(runtime.dxmtRoot.appendingPathComponent("i386-windows"), to: syswow64(prefix), skipping: ["winemetal.dll"])
+            // DXMT's DLLs are Wine builtins linked against this Wine (-Dwine_builtin_dll=true). Wine
+            // loads a builtin from its own lib/wine even when a copy sits in system32, so DXMT runs
+            // from wine-dxmt/ (ensureDXMTOverlay) and every D3D DLL stays builtin; an `n,b` override
+            // would be wrong. wineboot does not put winemetal.dll in the prefix, so it is copied there.
+            setup.wineRoot = runtime.dxmtWineRoot
             setup.overrides.set("winemetal", "b")
+            for (arch, dest) in [("x86_64-windows", system32(prefix)), ("i386-windows", syswow64(prefix))] {
+                let dir = runtime.dxmtRoot.appendingPathComponent(arch, isDirectory: true)
+                for name in runtime.dlls(in: dir) where name.lowercased() == "winemetal.dll" {
+                    setup.copies.append(DLLCopy(source: dir.appendingPathComponent(name), destination: dest.appendingPathComponent("winemetal.dll")))
+                }
+            }
         case .dxvk:
             native(runtime.dxvkRoot.appendingPathComponent("x64"), to: system32(prefix))
             native(runtime.dxvkRoot.appendingPathComponent("x32"), to: syswow64(prefix))
@@ -98,26 +106,66 @@ public enum BackendFiles {
         return setup
     }
 
-    /// Copies DXMT's Wine-side pieces (winemetal.dll and winemetal.so) into the runtime's Wine tree.
-    /// The names are DXMT's own, so wined3d and DXVK runs are unaffected.
-    public static func integrateDXMT(into runtime: Runtime) throws {
-        let wineLib = runtime.wineRoot.appendingPathComponent("lib/wine", isDirectory: true)
-        let pairs: [(String, String)] = [
-            ("x86_64-windows/winemetal.dll", "x86_64-windows/winemetal.dll"),
-            ("i386-windows/winemetal.dll", "i386-windows/winemetal.dll"),
-            ("x86_64-unix/winemetal.so", "x86_64-unix/winemetal.so"),
-        ]
-        for (src, dst) in pairs {
-            let s = runtime.dxmtRoot.appendingPathComponent(src)
-            guard FileManager.default.fileExists(atPath: s.path) else { continue }
-            _ = try copyIfChanged(s, to: wineLib.appendingPathComponent(dst))
-        }
+    /// What `wine-dxmt/` was built from; a mismatch means it is stale.
+    struct DXMTOverlayStamp: Codable, Equatable {
+        var wineInstalled: Double?
+        var dxmtInstalled: Double?
     }
 
-    public static func isDXMTIntegrated(_ runtime: Runtime) -> Bool {
+    /// DXMT's directories and the `lib/wine` directories their files go to.
+    static let dxmtLayout: [(from: String, to: String, suffix: String)] = [
+        ("x86_64-windows", "x86_64-windows", ".dll"),
+        ("i386-windows", "i386-windows", ".dll"),
+        ("x86_64-unix", "x86_64-unix", ".so"),
+    ]
+
+    static func dxmtOverlayStamp(_ runtime: Runtime) -> DXMTOverlayStamp {
+        let m = runtime.manifest()
+        return DXMTOverlayStamp(wineInstalled: m.components["wine"]?.installed.timeIntervalSince1970.rounded(.down),
+                                dxmtInstalled: m.components["dxmt"]?.installed.timeIntervalSince1970.rounded(.down))
+    }
+
+    /// True when `wine-dxmt/` exists, was built from the installed Wine and DXMT, and has `winemetal.so`.
+    public static func isDXMTOverlayCurrent(_ runtime: Runtime) -> Bool {
+        let o = runtime.dxmtWineRoot
+        let fm = FileManager.default
+        guard let old = try? JSONFile.loadIfPresent(DXMTOverlayStamp.self, from: o.appendingPathComponent(".mg-overlay.json")),
+              old == dxmtOverlayStamp(runtime),
+              fm.isExecutableFile(atPath: Runtime.wineBinary(in: o).path) else { return false }
         let so = runtime.dxmtRoot.appendingPathComponent("x86_64-unix/winemetal.so")
-        guard FileManager.default.fileExists(atPath: so.path) else { return true } // nothing to integrate
-        return FileManager.default.fileExists(atPath: runtime.wineRoot.appendingPathComponent("lib/wine/x86_64-unix/winemetal.so").path)
+        return !fm.fileExists(atPath: so.path)
+            || fm.fileExists(atPath: o.appendingPathComponent("lib/wine/x86_64-unix/winemetal.so").path)
+    }
+
+    /// Builds (or reuses) `wine-dxmt/`: a clone of `wine/` with DXMT's PE DLLs copied over Wine's
+    /// builtins in `lib/wine/{x86_64,i386}-windows` and `winemetal.so` added to `lib/wine/x86_64-unix`.
+    /// This is the install recipe in docs/ARTIFACTS.md, applied to a copy so `wine/` stays stock for
+    /// wined3d and DXVK bottles. Returns true when it (re)built the tree.
+    @discardableResult
+    public static func ensureDXMTOverlay(runtime: Runtime) throws -> Bool {
+        if isDXMTOverlayCurrent(runtime) { return false }
+        let fm = FileManager.default
+        let tmp = runtime.root.appendingPathComponent(".wine-dxmt-\(UUID().uuidString)", isDirectory: true)
+        defer { try? fm.removeItem(at: tmp) }
+        try fm.copyItem(at: runtime.wineRoot, to: tmp)
+        let lib = tmp.appendingPathComponent("lib/wine", isDirectory: true)
+        for (from, to, suffix) in dxmtLayout {
+            let src = runtime.dxmtRoot.appendingPathComponent(from, isDirectory: true)
+            let names = ((try? fm.contentsOfDirectory(atPath: src.path)) ?? []).filter { $0.lowercased().hasSuffix(suffix) }
+            guard !names.isEmpty else { continue }
+            let dst = lib.appendingPathComponent(to, isDirectory: true)
+            try fm.createDirectory(at: dst, withIntermediateDirectories: true)
+            for name in names {
+                // Wine looks builtins up by lower-case name.
+                let d = dst.appendingPathComponent(name.lowercased())
+                if fm.fileExists(atPath: d.path) || (try? fm.destinationOfSymbolicLink(atPath: d.path)) != nil { try fm.removeItem(at: d) }
+                try fm.copyItem(at: src.appendingPathComponent(name), to: d)
+            }
+        }
+        try JSONFile.save(dxmtOverlayStamp(runtime), to: tmp.appendingPathComponent(".mg-overlay.json"))
+        if fm.fileExists(atPath: runtime.dxmtWineRoot.path) { try fm.removeItem(at: runtime.dxmtWineRoot) }
+        try fm.moveItem(at: tmp, to: runtime.dxmtWineRoot)
+        return true
     }
 
     /// Places the backend's DLLs in the bottle. Returns how many files changed.

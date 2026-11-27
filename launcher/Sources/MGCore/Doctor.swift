@@ -104,9 +104,22 @@ public struct Doctor {
                 out.append(.init(.error, "runtime \(rt.name)\(tag): no Wine", "\(rt.wineBinary.path) missing or not executable"))
             }
             if rt.hasDXMT {
-                let ok = BackendFiles.isDXMTIntegrated(rt)
-                out.append(.init(ok ? .ok : .warning, "runtime \(rt.name): DXMT \(m.components["dxmt"]?.version ?? "")",
-                                 ok ? "" : "winemetal is not in the Wine tree yet; the next DXMT run copies it"))
+                let title = "runtime \(rt.name): DXMT \(m.components["dxmt"]?.version ?? "")"
+                if !rt.hasWine {
+                    out.append(.init(.warning, title, "no Wine in this runtime to merge DXMT into"))
+                } else if BackendFiles.isDXMTOverlayCurrent(rt) {
+                    out.append(.init(.ok, title, "winemetal integrated: \(rt.dxmtWineRoot.path)"))
+                } else {
+                    out.append(.init(.warning, title, "\(rt.dxmtWineRoot.path) is missing or stale; the next DXMT run rebuilds it"))
+                }
+                // DXMT's builtins are linked against one Wine build (dxmt/VERSION records which).
+                if let built = rt.dxmtBuiltAgainst, let wineArchive = m.components["wine"]?.archive {
+                    let wine = RuntimeComponent.stripArchiveExtension(wineArchive)
+                    if wine.lowercased() != built.lowercased() {
+                        out.append(.init(.warning, "runtime \(rt.name): DXMT built for another Wine",
+                                         "DXMT was built against \(built), this runtime has \(wine); DX10/11 games may fail to start"))
+                    }
+                }
             } else {
                 out.append(.init(.warning, "runtime \(rt.name): DXMT not installed", "DX10/11 games fall back to D3DMetal, DXVK or wined3d"))
             }

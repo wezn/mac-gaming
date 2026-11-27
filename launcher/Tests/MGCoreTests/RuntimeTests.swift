@@ -6,6 +6,9 @@ final class RuntimeTests: XCTestCase {
         XCTAssertEqual(RuntimeComponent.version(fromArchive: "wine-crossover-26.3.0-wow64.tar.xz"), "crossover-26.3.0-wow64")
         XCTAssertEqual(RuntimeComponent.version(fromArchive: "dxmt-0.61.tar.xz"), "0.61")
         XCTAssertEqual(RuntimeComponent.version(fromArchive: "dxvk-macos-1.10.3-20230507.tar.gz"), "1.10.3-20230507")
+        // Names build-graphics.yml produces.
+        XCTAssertEqual(RuntimeComponent.version(fromArchive: "dxmt-0.80.tar.xz"), "0.80")
+        XCTAssertEqual(RuntimeComponent.version(fromArchive: "dxvk-macos-1.10.3-20230507-repack.tar.xz"), "1.10.3-20230507-repack")
         XCTAssertNil(RuntimeComponent.version(fromArchive: "random.tar.xz"))
     }
 
@@ -25,10 +28,11 @@ final class RuntimeTests: XCTestCase {
         XCTAssertFalse(rt.dxvkHasD3D8)
         XCTAssertEqual(rt.manifest().components["dxmt"]?.version, "0.61")
         XCTAssertEqual(try GlobalConfig.load(sb.paths).defaultRuntime, r.runtime)
-        // DXMT's Wine-side pieces were merged into the Wine tree.
-        XCTAssertTrue(BackendFiles.isDXMTIntegrated(rt))
-        XCTAssertEqual(sb.read(rt.wineRoot.appendingPathComponent("lib/wine/x86_64-windows/winemetal.dll")), "dxmt64-winemetal.dll")
-        XCTAssertEqual(sb.read(rt.wineRoot.appendingPathComponent("lib/wine/i386-windows/winemetal.dll")), "dxmt32-winemetal.dll")
+        // DXMT was merged into wine-dxmt/ (a clone of wine/).
+        XCTAssertTrue(BackendFiles.isDXMTOverlayCurrent(rt))
+        XCTAssertEqual(sb.read(rt.dxmtWineRoot.appendingPathComponent("lib/wine/x86_64-windows/winemetal.dll")), "dxmt64-winemetal.dll")
+        XCTAssertEqual(sb.read(rt.dxmtWineRoot.appendingPathComponent("lib/wine/i386-windows/winemetal.dll")), "dxmt32-winemetal.dll")
+        XCTAssertEqual(rt.dxmtBuiltAgainst, "wine-crossover-26.3.0-wow64")
         XCTAssertEqual(store.list().map(\.name), [r.runtime], "staging dirs are not listed")
         XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: sb.paths.runtimes.path).filter { $0.hasPrefix(".") }, [])
     }
@@ -48,6 +52,29 @@ final class RuntimeTests: XCTestCase {
         XCTAssertFalse(r.madeDefault)
         XCTAssertTrue(try store.get(r.runtime).hasDXVK)
         XCTAssertTrue(try store.get(r.runtime).hasWine, "earlier components are kept")
+    }
+
+    /// `gh run download` without `--name` makes one folder per artifact: `<dir>/<artifact>/<artifact>.tar.xz`.
+    func testInstallGraphicsFromGhRunDownloadLayout() throws {
+        let sb = try Sandbox()
+        let a = try sb.makeArchives()
+        let store = RuntimeStore(paths: sb.paths)
+        try store.install(sources: [a.wine])
+        let dl = sb.root.appendingPathComponent("graphics-artifacts", isDirectory: true)
+        for (src, artifact) in [(a.dxmt, "dxmt-0.80"), (a.dxvk, "dxvk-macos-1.10.3-20230507-repack")] {
+            let dir = dl.appendingPathComponent(artifact, isDirectory: true)
+            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            try FileManager.default.moveItem(at: src, to: dir.appendingPathComponent("\(artifact).tar.xz"))
+        }
+        let r = try store.install(sources: [dl])
+        XCTAssertEqual(r.runtime, "crossover-26.3.0-wow64")
+        XCTAssertEqual(r.installed.keys.sorted(), ["dxmt", "dxvk"])
+        let rt = try store.get(r.runtime)
+        XCTAssertEqual(rt.manifest().components["dxmt"]?.version, "0.80")
+        XCTAssertEqual(rt.manifest().components["dxvk"]?.version, "1.10.3-20230507-repack")
+        XCTAssertTrue(rt.hasDXMT && rt.hasDXVK)
+        XCTAssertTrue(BackendFiles.isDXMTOverlayCurrent(rt))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: rt.dxmtRoot.appendingPathComponent("LICENSE").path), "license kept with the DLLs")
     }
 
     func testInstallExtractedTreeCopiesRatherThanMoves() throws {
