@@ -29,6 +29,15 @@ public enum Store: String, CaseIterable, Sendable {
         }
     }
 
+    /// Saved into the store's bottle (values the user already set are kept), so the installer, the
+    /// client and the games it starts all get them. Battle.net's Chromium (libcef) writes to its own
+    /// copy-on-write mapped pages; without Wine's write-copy simulation its renderer and GPU processes
+    /// hit a breakpoint (0x80000003 in libcef) and the client closes. Verified by the Battle.net probe
+    /// workflow: 18-19 crashes per run without it, none with it.
+    public var bottleEnvironment: [String: String] {
+        self == .battlenet ? ["WINE_SIMULATE_WRITECOPY": "1"] : [:]
+    }
+
     /// Steam's Chromium UI needs these under Wine on macOS.
     public var clientArguments: [String] { self == .steam ? ["-cef-disable-gpu-compositing", "-cef-in-process-gpu"] : [] }
 }
