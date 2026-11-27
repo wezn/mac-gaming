@@ -56,12 +56,13 @@ jobs:
     permissions:
       contents: read
       actions: read # download the artifact of another workflow run
-    env:
-      MG_HOME: ${{ runner.temp }}/mg
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
+
+      - name: Use a throwaway mg root
+        run: echo "MG_HOME=$RUNNER_TEMP/mg" >> "$GITHUB_ENV"
 
       - name: Ensure Rosetta 2
         run: arch -x86_64 /usr/bin/true || sudo softwareupdate --install-rosetta --agree-to-license
