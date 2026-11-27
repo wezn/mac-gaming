@@ -6,7 +6,7 @@ on:
       crossover_version:
         description: CrossOver source version (see codeweavers.com/crossover/source)
         required: true
-        default: "26.0.0"
+        default: "26.3.0"
 
 jobs:
   build:
