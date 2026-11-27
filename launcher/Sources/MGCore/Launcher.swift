@@ -46,7 +46,7 @@ public struct LaunchPlan: Equatable, Sendable {
     public var programName: String
 }
 
-public struct Launcher {
+public struct Launcher: Sendable {
     public let paths: MGPaths
     public var baseEnvironment: [String: String]
 
