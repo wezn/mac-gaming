@@ -12,6 +12,10 @@
 #   arm64 Homebrew in /opt/homebrew
 #
 # Usage: scripts/build-wine.sh <crossover-version>   e.g. 26.3.0
+#
+# WINE_DEVEL=1 also writes wine-crossover-<v>-wow64-devel.tar.xz: headers, build tools
+# (winebuild, winegcc, ...) and PE import libraries. Overlay it on the runtime tarball to
+# build components against this Wine, e.g. DXMT's winemetal (see scripts/build-dxmt.sh).
 set -euo pipefail
 
 CX_VERSION="${1:?usage: $0 <crossover-version, e.g. 26.3.0>}"
@@ -111,8 +115,16 @@ rm -rf "$DIST"
 arch -x86_64 make install-lib DESTDIR="$DIST"
 mkdir -p "$DIST/lib"
 cp -a "$DEPS"/lib/libfreetype*.dylib "$DEPS/lib/libMoltenVK.dylib" "$DIST/lib/"
+if [[ "${WINE_DEVEL:-0}" == 1 ]]; then
+  echo "==> Installing development files to $WORK/dist/wine-devel"
+  rm -rf "$WORK/dist/wine-devel"
+  arch -x86_64 make install-dev DESTDIR="$WORK/dist/wine-devel/wine"
+fi
 
 cd "$WORK/dist"
-rm -f wine-crossover-*-wow64.tar.xz
+rm -f wine-crossover-*-wow64.tar.xz wine-crossover-*-wow64-devel.tar.xz
 tar -cJf "wine-crossover-$CX_VERSION-wow64.tar.xz" wine
+if [[ "${WINE_DEVEL:-0}" == 1 ]]; then
+  tar -cJf "wine-crossover-$CX_VERSION-wow64-devel.tar.xz" -C wine-devel wine
+fi
 echo "==> Done: $WORK/dist/wine-crossover-$CX_VERSION-wow64.tar.xz"
