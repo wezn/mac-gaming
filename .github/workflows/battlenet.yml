@@ -32,14 +32,15 @@ jobs:
       matrix:
         include:
           # All with WINE_SIMULATE_WRITECOPY=1 (what `mgx battlenet` saves; libcef crashes without it).
-          # exe: the program started; args: its arguments; nohwaccel: Battle.net.config sets
-          # Client.HardwareAcceleration=false (written before install and again before the start).
-          - { name: dxmt, backend: dxmt, exe: "Battle.net Launcher.exe", args: "", nohwaccel: false }
-          - { name: dxmt-inprocess, backend: dxmt, exe: "Battle.net Launcher.exe", args: "--in-process-gpu", nohwaccel: false }
-          - { name: dxmt-inprocess-bnexe, backend: dxmt, exe: "Battle.net.exe", args: "--in-process-gpu", nohwaccel: false }
-          - { name: dxmt-nohwaccel, backend: dxmt, exe: "Battle.net Launcher.exe", args: "", nohwaccel: true }
-          - { name: wined3d-inprocess, backend: wined3d, exe: "Battle.net Launcher.exe", args: "--in-process-gpu", nohwaccel: false }
-          - { name: wined3d-nohwaccel, backend: wined3d, exe: "Battle.net Launcher.exe", args: "", nohwaccel: true }
+          # args: Chromium switches; Battle.net Launcher.exe passes them on to Battle.net.exe.
+          # Without --in-process-gpu, DXMT logs "cross-process swapchain not supported yet" and the window
+          # stays black; Client.HardwareAcceleration=false in Battle.net.config made no difference.
+          - { name: wined3d-inprocess, backend: wined3d, args: "--in-process-gpu" }
+          - { name: wined3d-disable-gpu, backend: wined3d, args: "--disable-gpu" }
+          - { name: dxmt-inprocess, backend: dxmt, args: "--in-process-gpu" }
+          - { name: dxmt-disable-gpu, backend: dxmt, args: "--disable-gpu" }
+          - { name: dxmt-no-compositing, backend: dxmt, args: "--in-process-gpu --disable-gpu-compositing" }
+          - { name: dxmt-swiftshader, backend: dxmt, args: "--in-process-gpu --use-angle=swiftshader" }
     defaults:
       run:
         shell: bash # -eo pipefail
@@ -47,9 +48,7 @@ jobs:
       BACKEND: ${{ matrix.backend }}
       VARIANT_ENV: WINE_SIMULATE_WRITECOPY=1
       VARIANT: ${{ matrix.name }}
-      CLIENT_EXE: ${{ matrix.exe }}
       CLIENT_ARGS: ${{ matrix.args }}
-      NOHWACCEL: ${{ matrix.nohwaccel }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -62,7 +61,6 @@ jobs:
             echo "MGX=$GITHUB_WORKSPACE/launcher/.build/release/mgx"
             echo "SHOTS=$RUNNER_TEMP/screenshots"
             echo "BN_DIR=$RUNNER_TEMP/mg/bottles/bn/drive_c/Program Files (x86)/Battle.net"
-            echo "BN_CONFIG=$RUNNER_TEMP/mg/bottles/bn/drive_c/users/$USER/AppData/Roaming/Battle.net/Battle.net.config"
           } >> "$GITHUB_ENV"
 
       - name: Ensure Rosetta 2
@@ -108,14 +106,6 @@ jobs:
             'https://www.battle.net/download/getInstallerForGame?os=win&gameProgram=BATTLENET_APP&version=Live'
           ls -l "$RUNNER_TEMP/Battle.net-Setup.exe"
 
-      - name: Turn off Battle.net's browser hardware acceleration
-        if: matrix.nohwaccel
-        run: |
-          mkdir -p "$(dirname "$BN_CONFIG")"
-          [[ -s "$BN_CONFIG" ]] || echo '{}' > "$BN_CONFIG"
-          jq '.Client.HardwareAcceleration = "false"' "$BN_CONFIG" > "$BN_CONFIG.new" && mv "$BN_CONFIG.new" "$BN_CONFIG"
-          cat "$BN_CONFIG"
-
       - name: Install Battle.net
         run: |
           mkdir -p "$SHOTS"
@@ -143,18 +133,10 @@ jobs:
           echo "INSTALLED=$installed" >> "$GITHUB_ENV"
           $installed || { echo "::error::Battle.net.exe was not installed within 15 minutes (see screenshots)"; exit 1; }
 
-      - name: Turn off (again) Battle.net's browser hardware acceleration
-        if: matrix.nohwaccel
-        run: |
-          mkdir -p "$(dirname "$BN_CONFIG")"
-          [[ -s "$BN_CONFIG" ]] || echo '{}' > "$BN_CONFIG"
-          jq '.Client.HardwareAcceleration = "false"' "$BN_CONFIG" > "$BN_CONFIG.new" && mv "$BN_CONFIG.new" "$BN_CONFIG"
-          cat "$BN_CONFIG"
-
       - name: Start Battle.net
         run: |
-          echo "Battle.net.config after install:"; cat "$BN_CONFIG" || true; echo
-          exe="$BN_DIR/$CLIENT_EXE"
+          # The same program `mgx battlenet run` starts, with crash tracing.
+          exe="$BN_DIR/Battle.net Launcher.exe"
           # shellcheck disable=SC2086 # CLIENT_ARGS is a word list
           $MGX run --bottle bn --debug 'err+all,+seh,+loaddll' "$exe" $CLIENT_ARGS > "$RUNNER_TEMP/client.out" 2>&1 &
           pid=$!
@@ -176,7 +158,7 @@ jobs:
           {
             echo "## Battle.net: $VARIANT"
             echo "- backend: \`$BACKEND\`, extra env: \`${VARIANT_ENV:-none}\`, Wine from Build Wine run $WINE_RUN"
-            echo "- client: \`$CLIENT_EXE ${CLIENT_ARGS}\`, hardware acceleration off in Battle.net.config: $NOHWACCEL"
+            echo "- client: \`Battle.net Launcher.exe ${CLIENT_ARGS}\`"
             echo "- \"cross-process swapchain not supported\" (DXMT): $(grep -c 'cross-process swapchain' "$client_log" 2>/dev/null || true) after start, $(grep -c 'cross-process swapchain' "$install_log" 2>/dev/null || true) during install"
             echo "- installed: ${INSTALLED:-unknown}"
             echo "- crashes during install (incl. the client it starts): $(count "$install_log")"
