@@ -18,6 +18,13 @@ swift test
 
 macOS 13+ is required at run time. macOS 15+ is recommended: Rosetta 2 translates AVX/AVX2 only from macOS 15.
 
+**Prebuilt:** every Launcher workflow run uploads an arm64 release build as the `mg-macos-arm64` artifact
+(`mg-macos-arm64.tar.gz` plus its SHA-256). It is unsigned: `gh run download` leaves it runnable, but a copy
+downloaded with a browser is quarantined and needs `xattr -d com.apple.quarantine mg` first.
+
+**Testing on a Mac:** `scripts/mg-test-session.sh` downloads the newest mg, Wine and DXMT/DXVK builds, installs
+them into a throwaway root and walks through a checklist. See [docs/TESTING.md](../docs/TESTING.md).
+
 ## Quick start
 
 ```sh
@@ -52,7 +59,8 @@ mg run ~/Games/SomeGame/Game.exe -windowed
 | `mg steam install --bottle B` / `mg steam run --bottle B` | Download the official Steam installer, install silently, start the client |
 | `mg battlenet install --bottle B` / `mg battlenet run --bottle B` | Same for Battle.net (its installer is interactive) |
 | `mg config [show]` / `set <key> <value>` / `unset <key>` | Keys: `gptk`, `default-runtime`, `default-bottle` |
-| `mg doctor` | Check macOS version, Apple Silicon, Rosetta, runtimes, MoltenVK, DXMT, DXVK, the GPTK path and bottles. Exits 1 on errors |
+| `mg doctor` | Check macOS version, Apple Silicon, Rosetta, runtimes, MoltenVK, DXMT, DXVK, the GPTK path (and its version), the D3DMetal overlay and bottles. Exits 1 on errors. `--json` for machine-readable output |
+| `mg report` | Bundle host facts, doctor (text and JSON), settings, runtime manifests, the DXMT and D3DMetal overlay state, bottle settings and the newest logs into `mg-report-<time>.tar.gz` for a bug report. `$HOME` becomes `~`, your account name `USER`. `-o PATH` (a directory unless it ends in `.tar.gz`), `--logs N`, `--log-kib N` |
 | `mg logs` | List per-run logs. `--last` prints the newest, `--path` prints paths only, `--bottle B`, `-n N` |
 
 ### `mg run`
@@ -204,4 +212,4 @@ with wined3d. It then installs the DXMT and DXVK-macOS artifacts from the latest
 DX11/DX9 fixtures, runs `cmd.exe /c echo` with `--backend dxmt` and `--backend dxvk` (checking the
 DLLs that land in `system32`/`syswow64`), and loads each backend's `d3d11.dll` with `rundll32` under
 `+loaddll` to see which DLLs Wine picks. Nothing is rendered. Steps that need an artifact are skipped
-with a warning when no successful run exists yet.
+with a warning when no successful run exists yet. The logs and an `mg report` are uploaded as `smoke-logs`.

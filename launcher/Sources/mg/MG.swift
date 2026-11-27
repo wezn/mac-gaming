@@ -9,10 +9,11 @@ struct MG: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "mg",
         abstract: "Run Windows games on Apple Silicon Macs.",
-        version: "0.1.0",
+        version: MG.version,
         subcommands: [Run.self, BottleCommand.self, RuntimeCommand.self, SteamCommand.self, BattlenetCommand.self,
-                      ConfigCommand.self, Detect.self, Doctor.self, Logs.self]
+                      ConfigCommand.self, Detect.self, Doctor.self, Logs.self, Report.self]
     )
+    static let version = "0.1.0"
 }
 
 // MARK: shared helpers
@@ -521,13 +522,47 @@ struct ConfigCommand: ParsableCommand {
 
 struct Doctor: ParsableCommand {
     static let configuration = CommandConfiguration(abstract: "Check Rosetta, macOS, runtimes, backends and the GPTK path.")
+    @Flag(help: "Print the checks as JSON.") var json = false
+
     func run() throws {
         let checks = MGCore.Doctor(paths: Context.paths).run()
-        for c in checks {
-            let mark = c.status == .ok ? "✓" : c.status == .warning ? "!" : "✗"
-            print("\(mark) \(c.title)\(c.detail.isEmpty ? "" : "\n    \(c.detail)")")
-        }
+        print(json ? MGCore.Doctor.json(checks) : MGCore.Doctor.render(checks), terminator: "")
         if checks.contains(where: { $0.status == .error }) { throw ExitCode(1) }
+    }
+}
+
+// MARK: report
+
+struct Report: ParsableCommand {
+    static let configuration = CommandConfiguration(
+        abstract: "Bundle doctor output, settings and recent logs for a bug report.",
+        discussion: """
+        Writes a .tar.gz (or a directory, if --output does not end in .tar.gz or .tgz) with host facts,
+        `mg doctor` as text and JSON, config.json, overrides.json, runtime manifests, the D3DMetal overlay
+        state, bottle settings and the newest run logs. Your home directory is replaced with ~ and your
+        account name with USER. Skim the files before posting them publicly.
+        """)
+    @Option(name: .shortAndLong, help: "Output file or directory (default: ./mg-report-<time>.tar.gz).") var output: String?
+    @Option(help: "How many of the newest logs to include.") var logs = 10
+    @Option(help: "Keep only the last N KiB of each log.") var logKib = 512
+
+    func run() throws {
+        try guarded {
+            let f = DateFormatter()
+            f.locale = Locale(identifier: "en_US_POSIX")
+            f.dateFormat = "yyyyMMdd-HHmmss"
+            let stamp = f.string(from: Date())
+            let folder = "mg-report-\(stamp)"
+            let out = URL(fileURLWithPath: ((output ?? "\(folder).tar.gz") as NSString).expandingTildeInPath)
+            let report = DiagnosticReport.collect(paths: Context.paths, doctor: MGCore.Doctor(paths: Context.paths),
+                                                  toolVersion: MG.version, logCount: logs, maxLogBytes: max(1, logKib) * 1024)
+            if out.pathExtension == "tgz" || out.lastPathComponent.hasSuffix(".tar.gz") {
+                try report.writeArchive(to: out, folderName: folder)
+            } else {
+                try report.write(to: out)
+            }
+            print(out.path)
+        }
     }
 }
 
