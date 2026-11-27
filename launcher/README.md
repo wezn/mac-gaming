@@ -52,8 +52,10 @@ What it does (v1):
 - **Steam / Battle.net**: Install and Open buttons per bottle (same flow as `mg steam|battlenet install|run`).
 - **Wine Tools**: winecfg, regedit, explorer, taskmgr, notepad. **Stop All** runs `wineserver -k`.
 - **Runtimes**: install from a file picker or by dropping archives, zipped CI artifacts or folders;
-  make default; remove.
-- **Doctor**: the `mg doctor` checks. **Logs**: every run log, with a live tail.
+  make default; remove. Each runtime shows whether its `wine-dxmt/` overlay is current and warns
+  when DXMT was built against a different Wine; the run plan names the Wine tree it will use.
+- **Doctor**: the `mg doctor` checks. **Copy Diagnostics** puts a redacted `mg report` (without
+  logs) on the clipboard; **Save Report…** writes the full `.tar.gz`. **Logs**: every run log, with a live tail.
 - **Activity**: each background job (wineboot, an install, a running program) with mg's progress
   lines and its Wine log, tailing live. Settings (⌘,): GPTK path, default runtime and bottle.
 

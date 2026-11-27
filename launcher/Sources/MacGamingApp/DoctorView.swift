@@ -27,7 +27,9 @@ struct DoctorView: View {
                     .padding(.vertical, 2)
                 }
             } header: {
-                if model.doctorRunning && checks.isEmpty {
+                if model.collectingReport {
+                    ProgressView("Collecting diagnostics…").controlSize(.small)
+                } else if model.doctorRunning && checks.isEmpty {
                     ProgressView().controlSize(.small)
                 } else if !checks.isEmpty {
                     Text(errors == 0 && warnings == 0 ? "Everything looks good"
@@ -38,7 +40,21 @@ struct DoctorView: View {
         .listStyle(.inset)
         .navigationTitle("Doctor")
         .toolbar {
-            ToolbarItem {
+            ToolbarItemGroup {
+                Button {
+                    Task { await model.copyDiagnostics() }
+                } label: {
+                    Label("Copy Diagnostics", systemImage: "doc.on.clipboard")
+                }
+                .help("Copy a redacted report (doctor, settings, runtimes, bottles) for a bug report")
+                .disabled(model.collectingReport)
+                Button {
+                    Task { await model.saveReport() }
+                } label: {
+                    Label("Save Report…", systemImage: "archivebox")
+                }
+                .help("Save the full report with recent logs as a .tar.gz (same as `mg report`)")
+                .disabled(model.collectingReport)
                 Button {
                     Task { await model.runDoctor() }
                 } label: {

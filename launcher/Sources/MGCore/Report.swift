@@ -283,3 +283,16 @@ extension GPTKInstall {
         return nil
     }
 }
+
+extension DiagnosticReport {
+    /// The report as one paste-able text (for "Copy Diagnostics" in the app): each file under a
+    /// `==== name ====` header. Run logs (`logs/…`) and `doctor.json` (duplicates doctor.txt) are left out
+    /// unless asked for, so it stays short enough for an issue or a chat message.
+    public func plainText(includeLogs: Bool = false) -> String {
+        files
+            .filter { includeLogs || !$0.name.hasPrefix("logs/") }
+            .filter { $0.name != "doctor.json" }
+            .map { f in "==== \(f.name) ====\n" + (f.contents.hasSuffix("\n") ? f.contents : f.contents + "\n") }
+            .joined(separator: "\n")
+    }
+}

@@ -141,3 +141,17 @@ final class ReportTests: XCTestCase {
 private extension String {
     func repeated(_ n: Int) -> String { String(repeating: self, count: n) }
 }
+
+final class ReportPlainTextTests: XCTestCase {
+    func testPlainTextSkipsLogsAndJSONByDefault() {
+        let r = DiagnosticReport(files: [
+            .init(name: "summary.txt", contents: "mg 0.1.0\n"),
+            .init(name: "doctor.txt", contents: "✓ ok"),
+            .init(name: "doctor.json", contents: "{}"),
+            .init(name: "logs/b/run.log", contents: "wine output\n"),
+        ])
+        XCTAssertEqual(r.plainText(), "==== summary.txt ====\nmg 0.1.0\n\n==== doctor.txt ====\n✓ ok\n")
+        XCTAssertTrue(r.plainText(includeLogs: true).hasSuffix("==== logs/b/run.log ====\nwine output\n"))
+        XCTAssertFalse(r.plainText(includeLogs: true).contains("doctor.json"))
+    }
+}

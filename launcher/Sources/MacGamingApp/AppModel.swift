@@ -367,6 +367,47 @@ final class AppModel: ObservableObject {
         let p = paths
         doctorChecks = (try? await Blocking.run { Doctor(paths: p).run() }) ?? []
     }
+
+    // MARK: diagnostics (`mg report`)
+
+    @Published private(set) var collectingReport = false
+
+    private func collectReport() async -> DiagnosticReport? {
+        guard !collectingReport else { return nil }
+        collectingReport = true
+        defer { collectingReport = false }
+        let p = paths
+        return try? await Blocking.run {
+            DiagnosticReport.collect(paths: p, doctor: Doctor(paths: p), toolVersion: "\(MGVersion.string) (app)")
+        }
+    }
+
+    /// Copies the redacted report (without run logs) to the clipboard.
+    func copyDiagnostics() async {
+        guard let report = await collectReport() else { return }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(report.plainText(), forType: .string)
+        alert = AlertMessage(title: "Diagnostics copied",
+                             message: "Home folder and account name are redacted. Skim it before posting it publicly. Save Report… also includes the newest run logs.")
+    }
+
+    /// Writes the full report (with recent logs) as a .tar.gz, like `mg report`.
+    func saveReport() async {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.dateFormat = "yyyyMMdd-HHmmss"
+        let folder = "mg-report-\(f.string(from: Date()))"
+        let panel = NSSavePanel()
+        panel.nameFieldStringValue = "\(folder).tar.gz"
+        panel.message = "Save a diagnostics report (doctor, settings, runtimes, bottles, recent logs)"
+        guard panel.runModal() == .OK, let url = panel.url, let report = await collectReport() else { return }
+        do {
+            try await Blocking.run { try report.writeArchive(to: url, folderName: folder) }
+            Panels.reveal(url)
+        } catch {
+            self.report("Cannot save the report", error)
+        }
+    }
 }
 
 extension Backend {

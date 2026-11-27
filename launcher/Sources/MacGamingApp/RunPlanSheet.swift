@@ -156,7 +156,9 @@ struct PlanDetails: View {
                     row("Detected", detectedText)
                     if let note = plan.override?.note { row("Override", note) }
                     row("Backend", "\(plan.choice.backend.label) — \(plan.choice.reason)", bold: true)
-                    row("Runtime", plan.runtime.name)
+                    row("Runtime", plan.setup.wineRoot == plan.runtime.wineRoot
+                        ? plan.runtime.name
+                        : "\(plan.runtime.name), Wine from \(plan.setup.wineRoot.lastPathComponent)/ (\(overlayNote))")
                     row("Bottle", "\(plan.bottle.name)\(plan.bottle.isInitialized ? "" : " (wineboot runs first)")")
                     row("Options", "msync \(onOff(plan.environment["WINEMSYNC"] == "1")) · Retina \(onOff(plan.retina)) · Metal HUD \(onOff(plan.environment["MTL_HUD_ENABLED"] == "1"))")
                     if let wd = plan.workingDirectory { row("Folder", wd.path) }
@@ -235,6 +237,14 @@ struct PlanDetails: View {
     }
 
     private func onOff(_ b: Bool) -> String { b ? "on" : "off" }
+
+    private var overlayNote: String {
+        switch plan.setup.backend {
+        case .dxmt: return BackendFiles.isDXMTOverlayCurrent(plan.runtime) ? "Wine with DXMT merged in" : "Wine with DXMT merged in, built before launch"
+        case .d3dmetal: return "Wine with your D3DMetal merged in"
+        default: return "overlay"
+        }
+    }
 
     @ViewBuilder
     private func row(_ title: String, _ value: String, bold: Bool = false) -> some View {

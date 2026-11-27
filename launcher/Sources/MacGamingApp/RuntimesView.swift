@@ -101,6 +101,9 @@ struct RuntimeRow: View {
                     component("DXVK", installed: runtime.hasDXVK, version: manifest.components["dxvk"]?.version)
                 }
                 .font(.caption)
+                if runtime.hasWine && runtime.hasDXMT {
+                    dxmtStatus.font(.caption).foregroundStyle(.secondary)
+                }
             }
             Spacer()
             if !explicitDefault {
@@ -120,6 +123,22 @@ struct RuntimeRow: View {
             .help("Remove this runtime")
         }
         .padding(.vertical, 4)
+    }
+
+    /// DXMT runs from `wine-dxmt/`, a clone of `wine/` with DXMT's builtins merged in.
+    @ViewBuilder
+    private var dxmtStatus: some View {
+        let built = runtime.dxmtBuiltAgainst
+        let wine = runtime.manifest().components["wine"].map { RuntimeComponent.stripArchiveExtension($0.archive) }
+        if BackendFiles.isDXMTOverlayCurrent(runtime) {
+            Text("DXMT runs from \(runtime.dxmtWineRoot.lastPathComponent)/ (up to date)")
+        } else {
+            Text("\(runtime.dxmtWineRoot.lastPathComponent)/ is missing or stale; the next DXMT run rebuilds it")
+        }
+        if let built, let wine, built.lowercased() != wine.lowercased() {
+            Label("DXMT was built against \(built), this runtime has \(wine)", systemImage: "exclamationmark.triangle.fill")
+                .foregroundStyle(.orange)
+        }
     }
 
     private func component(_ name: String, installed: Bool, version: String?) -> some View {
