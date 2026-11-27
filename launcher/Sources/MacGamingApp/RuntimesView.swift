@@ -55,7 +55,7 @@ struct RuntimesView: View {
             Image(systemName: "tray.and.arrow.down")
                 .font(.system(size: 26))
                 .foregroundStyle(dropTargeted ? Color.accentColor : .secondary)
-            Text("Drop wine-crossover-*.tar.xz, dxmt-*.tar.xz, dxvk-macos-*.tar.xz, a zipped CI artifact, or a folder here")
+            Text(verbatim: "Drop wine-crossover-*.tar.xz, dxmt-*.tar.xz, dxvk-macos-*.tar.xz, a zipped CI artifact, or a folder here")
                 .multilineTextAlignment(.center)
                 .foregroundStyle(.secondary)
             Button("Choose…") { model.installRuntime(from: Panels.chooseRuntimeSources()) }
