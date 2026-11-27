@@ -193,6 +193,11 @@ mgx battlenet install --bottle ow --backend d3dmetal
 mgx battlenet run --bottle ow
 ```
 
+`mgx battlenet install` / `run` also save `WINE_SIMULATE_WRITECOPY=1` in the bottle (unless you set it
+yourself): without it Battle.net's built-in browser crashes (`int3` in `libcef`) and the client closes
+with "encountered a serious problem". The Battle.net probe workflow (`.github/workflows/battlenet.yml`)
+checks this on a CI Mac.
+
 ### Per-game overrides
 
 `overrides.json` in the mgx root, merged over the built-in table and keyed by executable name

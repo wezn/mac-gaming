@@ -109,6 +109,7 @@ extension Launcher {
             try createBottle(BottleConfig(name: name, backend: backend), log: log)
             log("created bottle '\(name)'")
         }
+        try applyStoreEnvironment(store, bottle: name, log: log)
         let file = installerFile(for: store)
         if redownload || !FileManager.default.fileExists(atPath: file.path) {
             log("downloading \(store.installerURL.absoluteString)")
@@ -117,8 +118,19 @@ extension Launcher {
         return try plan(RunRequest(bottle: name, backend: .wined3d, program: file.path, arguments: store.installerArguments))
     }
 
+    /// Adds the store's `bottleEnvironment` to the bottle's saved env, keeping values the user set.
+    func applyStoreEnvironment(_ store: Store, bottle name: String, log: (String) -> Void) throws {
+        let b = try bottles.get(name)
+        let missing = store.bottleEnvironment.filter { b.config.env[$0.key] == nil }
+        guard !missing.isEmpty else { return }
+        try updateBottle(name) { c in for (k, v) in missing { c.env[k] = v } }
+        log("set \(missing.keys.sorted().map { "\($0)=\(missing[$0]!)" }.joined(separator: " ")) in bottle '\(name)' for \(store.displayName)")
+    }
+
     /// Plans starting the store client in a bottle. Throws if the client is not installed there.
-    public func planStoreClient(_ store: Store, bottle name: String, backend: Backend? = nil, arguments: [String] = []) throws -> LaunchPlan {
+    public func planStoreClient(_ store: Store, bottle name: String, backend: Backend? = nil, arguments: [String] = [],
+                                log: (String) -> Void = { _ in }) throws -> LaunchPlan {
+        try applyStoreEnvironment(store, bottle: name, log: log) // bottles installed before it existed
         let b = try bottles.get(name)
         guard let exe = clientExecutable(store, in: b) else {
             throw MGError.io("\(store.displayName) is not installed in bottle '\(name)': run `mgx \(store.rawValue) install --bottle \(name)`")

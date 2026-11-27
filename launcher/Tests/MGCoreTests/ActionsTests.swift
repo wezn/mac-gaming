@@ -129,6 +129,27 @@ final class ActionsTests: XCTestCase {
         XCTAssertEqual(p.choice.reason, "bottle default")
         XCTAssertEqual(p.arguments.last, "--x")
         XCTAssertEqual(p.programName, "Battle.net Launcher.exe")
+        XCTAssertEqual(p.environment["WINE_SIMULATE_WRITECOPY"], "1", "added to bottles that predate it")
+        XCTAssertEqual(try l.bottles.get("bn").config.env["WINE_SIMULATE_WRITECOPY"], "1", "saved, so games get it too")
+    }
+
+    func testStoreEnvironmentIsSavedAndKeepsUserValues() throws {
+        let sb = try Sandbox()
+        let l = try launcher(sb)
+        let fakeDownload: (URL, URL) throws -> Void = { _, dest in
+            try FileManager.default.createDirectory(at: dest.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try Data("MZ".utf8).write(to: dest)
+        }
+        let p = try l.planStoreInstall(.battlenet, bottle: "bn", download: fakeDownload)
+        XCTAssertEqual(p.environment["WINE_SIMULATE_WRITECOPY"], "1")
+        XCTAssertEqual(try l.bottles.get("bn").config.env, ["WINE_SIMULATE_WRITECOPY": "1"])
+
+        try l.updateBottle("bn") { $0.env["WINE_SIMULATE_WRITECOPY"] = "0" }
+        let p2 = try l.planStoreInstall(.battlenet, bottle: "bn", download: fakeDownload)
+        XCTAssertEqual(p2.environment["WINE_SIMULATE_WRITECOPY"], "0", "a value the user set wins")
+
+        _ = try l.planStoreInstall(.steam, bottle: "steam", download: fakeDownload)
+        XCTAssertEqual(try l.bottles.get("steam").config.env, [:], "Steam needs nothing extra")
     }
 
     func testEnvironmentChanges() throws {
