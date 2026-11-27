@@ -167,7 +167,7 @@ jobs:
   smoke-test:
     needs: [wine, dxmt, dxvk]
     runs-on: macos-15
-    timeout-minutes: 60
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:

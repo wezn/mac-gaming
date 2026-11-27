@@ -17,6 +17,10 @@ WORK="${WORK:-$ROOT/build}"
 T="$WORK/smoke"
 BREW=/opt/homebrew/bin/brew
 STRICT_DEVICE="${STRICT_DEVICE:-0}"
+STEP_TIMEOUT="${STEP_TIMEOUT:-300}"   # seconds per Wine invocation; a hang fails fast
+
+# Run "$@" with a hard timeout (macOS has no timeout(1); the alarm survives exec).
+with_timeout() { perl -e 'alarm shift; exec @ARGV or die "exec: $!"' "$STEP_TIMEOUT" "$@"; }
 
 [[ "$(uname -s)" == Darwin ]] || { echo "must run on macOS" >&2; exit 1; }
 export HOMEBREW_NO_AUTO_UPDATE=1 HOMEBREW_NO_INSTALL_UPGRADE=1 \
@@ -49,7 +53,7 @@ run() { # run <label> <wine-dir> <prefix> <exe> <backend> [ENV=...]
   local label="$1" wine="$2" prefix="$3" exe="$4" backend="$5"; shift 5
   local log="$T/$label.log" rc=0
   echo "==> [$label] $exe"
-  env WINEPREFIX="$prefix" WINEDEBUG="${WINEDEBUG:--all}" "$@" \
+  with_timeout env WINEPREFIX="$prefix" WINEDEBUG="${WINEDEBUG:--all}" "$@" \
     "$wine/bin/wine" "$exe" "$backend" >"$log" 2>&1 || rc=$?
   cat "$log"
   case "$rc" in
@@ -67,8 +71,10 @@ run() { # run <label> <wine-dir> <prefix> <exe> <backend> [ENV=...]
 
 boot() { # boot <wine-dir> <prefix>
   echo "==> wineboot $2"
-  WINEPREFIX="$2" WINEDEBUG=-all "$1/bin/wine" wineboot -i
-  WINEPREFIX="$2" "$1/bin/wineserver" -w
+  # mscoree/mshtml disabled: otherwise wineboot waits on a Wine Mono/Gecko install dialog.
+  WINEPREFIX="$2" WINEDEBUG=-all WINEDLLOVERRIDES="mscoree,mshtml=" \
+    with_timeout "$1/bin/wine" wineboot -i
+  WINEPREFIX="$2" with_timeout "$1/bin/wineserver" -w
 }
 
 # --- DXMT: builtin-marked DLLs replace Wine's own, winemetal.so goes next to the other unixlibs.
