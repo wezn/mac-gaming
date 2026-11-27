@@ -195,8 +195,11 @@ mgx battlenet run --bottle ow
 
 `mgx battlenet install` / `run` also save `WINE_SIMULATE_WRITECOPY=1` in the bottle (unless you set it
 yourself): without it Battle.net's built-in browser crashes (`int3` in `libcef`) and the client closes
-with "encountered a serious problem". The Battle.net probe workflow (`.github/workflows/battlenet.yml`)
-checks this on a CI Mac.
+with "encountered a serious problem". `mgx battlenet run` starts the client with
+`--in-process-gpu --disable-gpu-compositing`: without them the window freezes or stays black (DXMT
+cannot present from Chromium's separate GPU process). The Battle.net probe workflow
+(`.github/workflows/battlenet.yml`) checks both on a CI Mac. The installer starts the client once
+without these switches; if that window freezes, quit it and use `mgx battlenet run`.
 
 ### Per-game overrides
 

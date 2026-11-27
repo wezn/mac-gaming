@@ -32,15 +32,14 @@ jobs:
       matrix:
         include:
           # All with WINE_SIMULATE_WRITECOPY=1 (what `mgx battlenet` saves; libcef crashes without it).
-          # args: Chromium switches; Battle.net Launcher.exe passes them on to Battle.net.exe.
-          # Without --in-process-gpu, DXMT logs "cross-process swapchain not supported yet" and the window
-          # stays black; Client.HardwareAcceleration=false in Battle.net.config made no difference.
-          - { name: wined3d-inprocess, backend: wined3d, args: "--in-process-gpu" }
-          - { name: wined3d-disable-gpu, backend: wined3d, args: "--disable-gpu" }
-          - { name: dxmt-inprocess, backend: dxmt, args: "--in-process-gpu" }
-          - { name: dxmt-disable-gpu, backend: dxmt, args: "--disable-gpu" }
-          - { name: dxmt-no-compositing, backend: dxmt, args: "--in-process-gpu --disable-gpu-compositing" }
-          - { name: dxmt-swiftshader, backend: dxmt, args: "--in-process-gpu --use-angle=swiftshader" }
+          # args: Chromium switches (Battle.net Launcher.exe passes them on to Battle.net.exe); "mgx" is
+          # what `mgx battlenet run` passes (Store.battlenet.clientArguments). Earlier runs: with no
+          # switches DXMT logs "cross-process swapchain not supported yet" and the window freezes,
+          # --in-process-gpu alone leaves it black, --disable-gpu leaves it white on both backends, and
+          # Client.HardwareAcceleration=false in Battle.net.config changes nothing.
+          - { name: dxmt, backend: dxmt, args: "--in-process-gpu --disable-gpu-compositing" }
+          - { name: wined3d, backend: wined3d, args: "--in-process-gpu --disable-gpu-compositing" }
+          - { name: dxmt-no-switches, backend: dxmt, args: "" }
     defaults:
       run:
         shell: bash # -eo pipefail
