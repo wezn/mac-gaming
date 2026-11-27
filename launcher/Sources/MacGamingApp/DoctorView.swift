@@ -53,7 +53,7 @@ struct DoctorView: View {
                 } label: {
                     Label("Save Report…", systemImage: "archivebox")
                 }
-                .help("Save the full report with recent logs as a .tar.gz (same as `mg report`)")
+                .help("Save the full report with recent logs as a .tar.gz (same as `mgx report`)")
                 .disabled(model.collectingReport)
                 Button {
                     Task { await model.runDoctor() }

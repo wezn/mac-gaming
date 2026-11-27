@@ -1,6 +1,6 @@
 import Foundation
 
-/// What the user asked for with `mg run`.
+/// What the user asked for with `mgx run`.
 public struct RunRequest: Equatable, Sendable {
     public var bottle: String?
     public var backend: Backend?
@@ -157,7 +157,7 @@ public struct Launcher: Sendable {
     /// Runs the planned program and waits for it. Output goes to `plan.logFile` (and the terminal with `echo`).
     public func execute(_ plan: LaunchPlan, echo: Bool = false) throws -> Int32 {
         let header = """
-        # mg run \(plan.programName) in bottle \(plan.bottle.name) at \(ISO8601DateFormatter().string(from: Date()))
+        # mgx run \(plan.programName) in bottle \(plan.bottle.name) at \(ISO8601DateFormatter().string(from: Date()))
         # backend: \(plan.choice.backend.rawValue) (\(plan.choice.reason))
         # command: \(([plan.executable.path] + plan.arguments).joined(separator: " "))
         # WINEDLLOVERRIDES=\(plan.environment["WINEDLLOVERRIDES"] ?? "")

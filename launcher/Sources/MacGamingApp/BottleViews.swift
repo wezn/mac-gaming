@@ -89,7 +89,7 @@ struct BottleDetailView: View {
             } header: {
                 Text("Environment")
             } footer: {
-                Text("Set for every program in this bottle. WINEDLLOVERRIDES is merged with mg's own overrides.")
+                Text("Set for every program in this bottle. WINEDLLOVERRIDES is merged with mgx's own overrides.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

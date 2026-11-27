@@ -25,7 +25,7 @@ public struct Bottle: Equatable, Sendable {
     }
 }
 
-/// Things mg has applied to the prefix (so repeat launches skip them).
+/// Things mgx has applied to the prefix (so repeat launches skip them).
 struct BottleState: Codable, Equatable {
     var retinaApplied: Bool?
 }

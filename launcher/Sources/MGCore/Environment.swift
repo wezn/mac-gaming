@@ -41,7 +41,7 @@ public enum EnvironmentBuilder {
     /// dyld's own default fallback list, kept so system libraries still resolve once we set the variable.
     static let defaultFallback = ["/usr/local/lib", "/usr/lib"]
 
-    /// Layers, lowest to highest priority: inherited `base` → mg defaults → backend → game override →
+    /// Layers, lowest to highest priority: inherited `base` → mgx defaults → backend → game override →
     /// bottle → `--env`. `WINEDLLOVERRIDES` is merged entry by entry across all layers rather than
     /// replaced, and `WINEPREFIX` always points at the bottle.
     public static func build(base: [String: String], spec: EnvironmentSpec) -> [String: String] {

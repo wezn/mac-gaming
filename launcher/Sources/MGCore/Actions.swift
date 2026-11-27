@@ -121,13 +121,13 @@ extension Launcher {
     public func planStoreClient(_ store: Store, bottle name: String, backend: Backend? = nil, arguments: [String] = []) throws -> LaunchPlan {
         let b = try bottles.get(name)
         guard let exe = clientExecutable(store, in: b) else {
-            throw MGError.io("\(store.displayName) is not installed in bottle '\(name)': run `mg \(store.rawValue) install --bottle \(name)`")
+            throw MGError.io("\(store.displayName) is not installed in bottle '\(name)': run `mgx \(store.rawValue) install --bottle \(name)`")
         }
         return try plan(RunRequest(bottle: name, backend: backend, program: exe.path, arguments: store.clientArguments + arguments))
     }
 }
 
-/// One variable a launch sets, changes or removes relative to the environment mg was started with.
+/// One variable a launch sets, changes or removes relative to the environment mgx was started with.
 public struct EnvironmentChange: Equatable, Sendable {
     public var key: String
     /// nil: the launch removes the variable.

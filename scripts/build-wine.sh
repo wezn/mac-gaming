@@ -97,7 +97,7 @@ export LDFLAGS="-L$DEPS/lib -Wl,-headerpad_max_install_names -Wl,-rpath,@loader_
 # GnuTLS is what Wine's schannel (secur32) and bcrypt use for TLS and crypto. Without it,
 # every HTTPS request made through WinHTTP/WinINet fails, and Battle.net and Steam report
 # "no internet". GMP and GnuTLS come from CrossOver's sources, nettle from GNU; build them as x86_64
-# dylibs and ship them in lib/. Wine dlopens libgnutls.30.dylib by name, and mg puts lib/
+# dylibs and ship them in lib/. Wine dlopens libgnutls.30.dylib by name, and mgx puts lib/
 # on DYLD_FALLBACK_LIBRARY_PATH.
 echo "==> Building x86_64 GMP, nettle and GnuTLS"
 TLS_HOST=x86_64-apple-darwin

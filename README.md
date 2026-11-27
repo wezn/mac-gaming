@@ -4,7 +4,7 @@
 
 Created in [T3 Code](https://t3.codes).
 
-- [`launcher/`](launcher/README.md): `mg`, the command-line launcher (Swift), and the MGCore library behind it.
+- [`launcher/`](launcher/README.md): `mgx`, the command-line launcher (Swift), and the MGCore library behind it.
 - [`scripts/build-wine.sh`](scripts/build-wine.sh): builds CrossOver's Wine for Apple Silicon (run in CI by `build-wine.yml`).
 
 ## License

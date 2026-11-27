@@ -97,14 +97,14 @@ final class ReportTests: XCTestCase {
         XCTAssertEqual(names.filter { $0.hasSuffix(".log") }, ["logs/ow/\(new.lastPathComponent)"], "only the newest log")
 
         let log = try XCTUnwrap(report.file("logs/ow/\(new.lastPathComponent)")).contents
-        XCTAssertTrue(log.hasPrefix("[mg report: first "), "truncated from the front")
+        XCTAssertTrue(log.hasPrefix("[mgx report: first "), "truncated from the front")
         XCTAssertTrue(log.contains(#"loaded ~/foo C:\users\USER\AppData"#), log)
         XCTAssertTrue(log.hasSuffix("END\n"))
 
         for f in report.files {
             XCTAssertFalse(f.contents.contains(home), "\(f.name) leaks the home path")
         }
-        XCTAssertTrue(report.file("summary.txt")!.contents.contains("mg 9.9"))
+        XCTAssertTrue(report.file("summary.txt")!.contents.contains("mgx 9.9"))
         XCTAssertTrue(report.file("summary.txt")!.contents.contains("MG_HOME=~/home"))
         XCTAssertTrue(report.file("doctor.txt")!.contents.contains("✓ D3DMetal (GPTK)"))
         XCTAssertTrue(report.file("doctor.json")!.contents.contains(#""status" : "ok""#))
@@ -127,14 +127,14 @@ final class ReportTests: XCTestCase {
         let sb = try Sandbox()
         let report = DiagnosticReport(files: [.init(name: "summary.txt", contents: "hi\n"), .init(name: "logs/b/x.log", contents: "log\n")])
         let archive = sb.root.appendingPathComponent("out/r.tar.gz")
-        try report.writeArchive(to: archive, folderName: "mg-report-test")
+        try report.writeArchive(to: archive, folderName: "mgx-report-test")
         let unpack = sb.root.appendingPathComponent("unpack")
         try FileManager.default.createDirectory(at: unpack, withIntermediateDirectories: true)
         let code = try Subprocess.run(URL(fileURLWithPath: "/usr/bin/tar"), ["-xzf", archive.path, "-C", unpack.path],
                                       environment: ProcessInfo.processInfo.environment, output: .null)
         XCTAssertEqual(code, 0)
-        XCTAssertEqual(sb.read(unpack.appendingPathComponent("mg-report-test/summary.txt")), "hi\n")
-        XCTAssertEqual(sb.read(unpack.appendingPathComponent("mg-report-test/logs/b/x.log")), "log\n")
+        XCTAssertEqual(sb.read(unpack.appendingPathComponent("mgx-report-test/summary.txt")), "hi\n")
+        XCTAssertEqual(sb.read(unpack.appendingPathComponent("mgx-report-test/logs/b/x.log")), "log\n")
     }
 }
 
@@ -145,12 +145,12 @@ private extension String {
 final class ReportPlainTextTests: XCTestCase {
     func testPlainTextSkipsLogsAndJSONByDefault() {
         let r = DiagnosticReport(files: [
-            .init(name: "summary.txt", contents: "mg 0.1.0\n"),
+            .init(name: "summary.txt", contents: "mgx 0.1.0\n"),
             .init(name: "doctor.txt", contents: "✓ ok"),
             .init(name: "doctor.json", contents: "{}"),
             .init(name: "logs/b/run.log", contents: "wine output\n"),
         ])
-        XCTAssertEqual(r.plainText(), "==== summary.txt ====\nmg 0.1.0\n\n==== doctor.txt ====\n✓ ok\n")
+        XCTAssertEqual(r.plainText(), "==== summary.txt ====\nmgx 0.1.0\n\n==== doctor.txt ====\n✓ ok\n")
         XCTAssertTrue(r.plainText(includeLogs: true).hasSuffix("==== logs/b/run.log ====\nwine output\n"))
         XCTAssertFalse(r.plainText(includeLogs: true).contains("doctor.json"))
     }

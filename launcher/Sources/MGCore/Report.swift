@@ -40,7 +40,7 @@ public struct Redactor: Sendable {
     }
 }
 
-/// `mg report`: one archive with what a remote helper needs to debug a setup: host facts, `mg doctor`
+/// `mgx report`: one archive with what a remote helper needs to debug a setup: host facts, `mgx doctor`
 /// (text and JSON), settings, runtimes, the DXMT and D3DMetal overlay state, bottles and the newest run logs.
 /// Every text file goes through `Redactor`.
 public struct DiagnosticReport {
@@ -72,7 +72,7 @@ public struct DiagnosticReport {
         // summary.txt
         let v = doctor.osVersion
         var summary = """
-        mg \(toolVersion)
+        mgx \(toolVersion)
         date: \(ISO8601DateFormatter().string(from: date))
         root: \(paths.root.path)
         os: \(ProcessInfo.processInfo.operatingSystemVersionString) (\(v.majorVersion).\(v.minorVersion).\(v.patchVersion))
@@ -145,7 +145,7 @@ public struct DiagnosticReport {
         }
         add("runtimes.txt", rts.isEmpty ? "no runtimes installed\n" : rts)
 
-        // gptk.txt: the layout mg found, so a wrong guess about Apple's folder structure is visible.
+        // gptk.txt: the layout mgx found, so a wrong guess about Apple's folder structure is visible.
         var g = "configured: \(gptkPath ?? "(not set)")\n"
         if let p = gptkPath {
             if let gptk {
@@ -204,7 +204,7 @@ public struct DiagnosticReport {
     /// Writes a `.tar.gz` whose single top-level folder is `folderName`.
     public func writeArchive(to archive: URL, folderName: String) throws {
         let fm = FileManager.default
-        let staging = fm.temporaryDirectory.appendingPathComponent("mg-report-\(UUID().uuidString)", isDirectory: true)
+        let staging = fm.temporaryDirectory.appendingPathComponent("mgx-report-\(UUID().uuidString)", isDirectory: true)
         defer { try? fm.removeItem(at: staging) }
         try write(to: staging.appendingPathComponent(folderName, isDirectory: true))
         try fm.createDirectory(at: archive.deletingLastPathComponent(), withIntermediateDirectories: true)
@@ -226,7 +226,7 @@ public struct DiagnosticReport {
         try? h.seek(toOffset: start)
         let data = (try? h.readToEnd()) ?? Data()
         let text = String(decoding: data, as: UTF8.self)
-        return start > 0 ? "[mg report: first \(start) bytes omitted]\n" + text : text
+        return start > 0 ? "[mgx report: first \(start) bytes omitted]\n" + text : text
     }
 
     /// Names only, sorted, directories marked with `/`. Frameworks are not descended into.

@@ -183,7 +183,7 @@ struct LogsView: View {
     }
 }
 
-/// A job under Activity: status, mg's progress lines, and the run's log tailing live.
+/// A job under Activity: status, mgx's progress lines, and the run's log tailing live.
 struct JobDetailView: View {
     @EnvironmentObject private var model: AppModel
     @ObservedObject var job: Job

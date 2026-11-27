@@ -79,7 +79,7 @@ public enum BackendSelector {
                 return BackendChoice(backend: .dxvk, reason: why, warnings: ["DXMT and D3DMetal are unavailable; using DXVK"])
             }
             return BackendChoice(backend: .wined3d, reason: why,
-                                 warnings: ["no DX10/11 backend is installed; falling back to wined3d (slow). Install DXMT with `mg runtime install dxmt-*.tar.xz`"])
+                                 warnings: ["no DX10/11 backend is installed; falling back to wined3d (slow). Install DXMT with `mgx runtime install dxmt-*.tar.xz`"])
         case .dx9:
             if available.dxvk { return BackendChoice(backend: .dxvk, reason: why) }
             return BackendChoice(backend: .wined3d, reason: why, warnings: ["DXVK is not installed; using wined3d"])
@@ -91,7 +91,7 @@ public enum BackendSelector {
         case .none:
             return BackendChoice(backend: .wined3d, reason: why == "auto" ? "auto: no DirectX imports found" : why,
                                  warnings: detection.source == .none && detection.evidence != nil
-                                    ? ["no Direct3D imports found; using wined3d. Launchers (Steam, Battle.net) pass their environment to games, so set the bottle's backend with `mg bottle set <name> --backend ...`"]
+                                    ? ["no Direct3D imports found; using wined3d. Launchers (Steam, Battle.net) pass their environment to games, so set the bottle's backend with `mgx bottle set <name> --backend ...`"]
                                     : [])
         }
     }
@@ -99,11 +99,11 @@ public enum BackendSelector {
     static func hint(for b: Backend) -> String {
         switch b {
         case .d3dmetal:
-            return "point mg at your Game Porting Toolkit with `mg config set gptk <path>` (D3DMetal cannot be bundled)"
+            return "point mgx at your Game Porting Toolkit with `mgx config set gptk <path>` (D3DMetal cannot be bundled)"
         case .dxmt:
-            return "install it into the runtime with `mg runtime install dxmt-<version>.tar.xz`"
+            return "install it into the runtime with `mgx runtime install dxmt-<version>.tar.xz`"
         case .dxvk:
-            return "install it into the runtime with `mg runtime install dxvk-macos-<version>.tar.xz`"
+            return "install it into the runtime with `mgx runtime install dxvk-macos-<version>.tar.xz`"
         case .auto, .wined3d:
             return "always available"
         }

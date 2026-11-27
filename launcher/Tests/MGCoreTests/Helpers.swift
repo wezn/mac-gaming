@@ -37,7 +37,7 @@ final class Sandbox {
     }
 
     /// A `wine/` tree whose `bin/wine` is a script that records how it was called.
-    /// (Only tests use a shell script; mg itself never goes through a shell.)
+    /// (Only tests use a shell script; mgx itself never goes through a shell.)
     func makeWineTree(at dir: URL) throws {
         let wine = """
         #!/bin/sh
