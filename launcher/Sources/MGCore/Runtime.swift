@@ -1,6 +1,7 @@
 import Foundation
 
-/// One installed runtime: `runtimes/<name>/{wine,dxmt,dxvk}` plus `runtime.json`.
+/// One installed runtime: `runtimes/<name>/{wine,dxmt,dxvk}` plus `runtime.json`, and the generated
+/// `wine-dxmt/` and `wine-d3dmetal/` trees.
 public struct Runtime: Equatable, Sendable {
     public var name: String
     public var root: URL
@@ -13,6 +14,9 @@ public struct Runtime: Equatable, Sendable {
     public var wineRoot: URL { root.appendingPathComponent("wine", isDirectory: true) }
     public var dxmtRoot: URL { root.appendingPathComponent("dxmt", isDirectory: true) }
     public var dxvkRoot: URL { root.appendingPathComponent("dxvk", isDirectory: true) }
+    /// Copy-on-write clone of `wine/` with DXMT's builtin DLLs and `winemetal.so` merged into `lib/wine`
+    /// (built at install time, rebuilt on demand).
+    public var dxmtWineRoot: URL { root.appendingPathComponent("wine-dxmt", isDirectory: true) }
     /// Copy-on-write clone of `wine/` with the user's D3DMetal files merged in (built on demand).
     public var d3dmetalWineRoot: URL { root.appendingPathComponent("wine-d3dmetal", isDirectory: true) }
     public var manifestFile: URL { root.appendingPathComponent("runtime.json") }
@@ -32,6 +36,18 @@ public struct Runtime: Equatable, Sendable {
     public var hasDXMT: Bool { !dlls(in: dxmtRoot.appendingPathComponent("x86_64-windows")).isEmpty }
     public var hasDXVK: Bool { !dlls(in: dxvkRoot.appendingPathComponent("x64")).isEmpty }
     public var dxvkHasD3D8: Bool { FileManager.default.fileExists(atPath: dxvkRoot.appendingPathComponent("x64/d3d8.dll").path) }
+
+    /// The Wine build DXMT was linked against, from the `Built against Wine:` line of `dxmt/VERSION`
+    /// (`wine-crossover-26.3.0-wow64`). DXMT's builtins only work with that Wine.
+    public var dxmtBuiltAgainst: String? {
+        guard let text = try? String(contentsOf: dxmtRoot.appendingPathComponent("VERSION"), encoding: .utf8) else { return nil }
+        let key = "built against wine:"
+        for line in text.split(whereSeparator: \.isNewline) where line.lowercased().hasPrefix(key) {
+            let v = line.dropFirst(key.count).trimmingCharacters(in: .whitespaces)
+            return v.isEmpty ? nil : v
+        }
+        return nil
+    }
 
     public func manifest() -> RuntimeManifest {
         (try? JSONFile.loadIfPresent(RuntimeManifest.self, from: manifestFile)) ?? RuntimeManifest(name: name)
@@ -63,14 +79,20 @@ public struct RuntimeManifest: Codable, Equatable, Sendable {
 public enum RuntimeComponent: String, CaseIterable, Sendable {
     case wine, dxmt, dxvk
 
-    /// Version from an archive name: `wine-crossover-26.3.0-wow64.tar.xz` → `crossover-26.3.0-wow64`,
-    /// `dxmt-0.61.tar.xz` → `0.61`, `dxvk-macos-1.10.3-20230507.tar.xz` → `1.10.3-20230507`.
-    public static func version(fromArchive name: String) -> String? {
+    /// `wine-crossover-26.3.0-wow64.tar.xz` → `wine-crossover-26.3.0-wow64`.
+    public static func stripArchiveExtension(_ name: String) -> String {
         var base = name
-        for ext in [".tar.xz", ".tar.gz", ".tar.bz2", ".tgz", ".txz", ".tar", ".zip"] where base.lowercased().hasSuffix(ext) {
+        for ext in RuntimeStore.archiveSuffixes where base.lowercased().hasSuffix(ext) {
             base.removeLast(ext.count)
             break
         }
+        return base
+    }
+
+    /// Version from an archive name: `wine-crossover-26.3.0-wow64.tar.xz` → `crossover-26.3.0-wow64`,
+    /// `dxmt-0.61.tar.xz` → `0.61`, `dxvk-macos-1.10.3-20230507.tar.xz` → `1.10.3-20230507`.
+    public static func version(fromArchive name: String) -> String? {
+        let base = stripArchiveExtension(name)
         for prefix in ["wine-", "dxvk-macos-", "dxvk-", "dxmt-"] where base.lowercased().hasPrefix(prefix) {
             let v = String(base.dropFirst(prefix.count))
             return v.isEmpty ? nil : v
@@ -245,12 +267,13 @@ public struct RuntimeStore {
             report.installed[c.rawValue] = label
             log("installed \(c.rawValue) from \(label)")
         }
-        if staged[.wine] != nil || staged[.dxmt] != nil {
-            // The D3DMetal overlay is a clone of wine/; rebuild it from the new tree on next use.
-            try? fm.removeItem(at: rt.d3dmetalWineRoot)
-        }
-        if rt.hasWine && rt.hasDXMT { try BackendFiles.integrateDXMT(into: rt) }
+        // The overlays are clones of wine/; drop them so they are rebuilt from the new trees.
+        if staged[.wine] != nil { try? fm.removeItem(at: rt.d3dmetalWineRoot) }
+        if staged[.wine] != nil || staged[.dxmt] != nil { try? fm.removeItem(at: rt.dxmtWineRoot) }
         try JSONFile.save(manifest, to: rt.manifestFile)
+        if rt.hasWine && rt.hasDXMT, try BackendFiles.ensureDXMTOverlay(runtime: rt) {
+            log("built \(rt.dxmtWineRoot.lastPathComponent)/ (Wine with DXMT merged in)")
+        }
 
         var config = try GlobalConfig.load(paths)
         if makeDefault || config.defaultRuntime == nil || (try? get(config.defaultRuntime!)) == nil {

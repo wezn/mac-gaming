@@ -57,15 +57,21 @@ final class Sandbox {
         try write("bin/wineserver", "#!/bin/sh\nexit 0\n", executable: true, in: dir)
         try write("lib/libMoltenVK.dylib", in: dir)
         try write("lib/wine/x86_64-windows/d3d11.dll", "wine-builtin-d3d11", in: dir)
+        try write("lib/wine/i386-windows/d3d11.dll", "wine-builtin32-d3d11", in: dir)
+        try write("lib/wine/x86_64-windows/wined3d.dll", "wine-builtin-wined3d", in: dir)
         try write("lib/wine/x86_64-unix/ntdll.so", in: dir)
     }
 
-    func makeDXMTTree(at dir: URL) throws {
+    /// Same layout as build-graphics.yml's `dxmt-<version>.tar.xz` (see docs/ARTIFACTS.md).
+    func makeDXMTTree(at dir: URL, builtAgainst: String = "wine-crossover-26.3.0-wow64") throws {
         for f in ["d3d11.dll", "dxgi.dll", "d3d10core.dll", "winemetal.dll"] {
             try write("x86_64-windows/\(f)", "dxmt64-\(f)", in: dir)
             try write("i386-windows/\(f)", "dxmt32-\(f)", in: dir)
         }
         try write("x86_64-unix/winemetal.so", "winemetal-unix", in: dir)
+        try write("LICENSE", "MIT", in: dir)
+        try write("dxmt.conf", "# sample", in: dir)
+        try write("VERSION", "DXMT v0.80 (589adb780354b461645b29999cefaf533594ee99)\nhttps://github.com/3Shain/dxmt\nBuilt against Wine: \(builtAgainst)\n", in: dir)
     }
 
     func makeDXVKTree(at dir: URL, d3d8: Bool = false) throws {
@@ -75,6 +81,9 @@ final class Sandbox {
             try write("x64/\(f)", "dxvk64-\(f)", in: dir)
             try write("x32/\(f)", "dxvk32-\(f)", in: dir)
         }
+        try write("LICENSE", "zlib", in: dir)
+        try write("dxvk.conf", "# sample", in: dir)
+        try write("VERSION", "DXVK-macOS v1.10.3-20230507-repack (8f1e28deed3ad30802f7e1bdff428ec14e6e7817)\n", in: dir)
     }
 
     /// Fake GPTK `redist/lib` under `<root>/gptk`; returns the folder a user would point at.

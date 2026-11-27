@@ -26,12 +26,13 @@ final class LauncherTests: XCTestCase {
         let p = try l.plan(RunRequest(bottle: "b", program: exe.path, arguments: ["-windowed"]))
         XCTAssertEqual(p.choice.backend, .dxmt)
         XCTAssertEqual(p.detection.level, .dx11)
-        XCTAssertEqual(p.executable, p.runtime.wineRoot.appendingPathComponent("bin/wine"))
+        XCTAssertEqual(p.executable, p.runtime.dxmtWineRoot.appendingPathComponent("bin/wine"))
         XCTAssertEqual(p.arguments, [exe.path, "-windowed"])
         XCTAssertEqual(p.workingDirectory, exe.deletingLastPathComponent())
         XCTAssertEqual(p.environment["WINEPREFIX"], sb.paths.bottle("b").path)
         XCTAssertEqual(p.environment["WINEMSYNC"], "1")
-        XCTAssertEqual(DLLOverrides(parsing: p.environment["WINEDLLOVERRIDES"]!)["d3d11"], "n,b")
+        XCTAssertEqual(DLLOverrides(parsing: p.environment["WINEDLLOVERRIDES"]!)["d3d11"], "b")
+        XCTAssertEqual(DLLOverrides(parsing: p.environment["WINEDLLOVERRIDES"]!)["winemetal"], "b")
         XCTAssertTrue(p.logFile.path.hasPrefix(sb.paths.logs.appendingPathComponent("b").path))
         XCTAssertFalse(p.retina)
     }
@@ -119,6 +120,24 @@ final class LauncherTests: XCTestCase {
         XCTAssertEqual(LogStore(paths: sb.paths).list(bottle: "b").first?.url, p.logFile)
     }
 
+    func testDXMTRunUsesOverlayAndDeploysWinemetal() throws {
+        let sb = try Sandbox()
+        let l = try setUp(sb)
+        let rt = try RuntimeStore(paths: sb.paths).resolve(nil, config: GlobalConfig.load(sb.paths))
+        try FileManager.default.removeItem(at: rt.dxmtWineRoot)
+        let p = try l.plan(RunRequest(bottle: "b", backend: .dxmt, program: "cmd.exe", arguments: ["/c", "echo", "hi"]))
+        var notes: [String] = []
+        try l.prepare(p, log: { notes.append($0) })
+        XCTAssertTrue(notes.contains { $0.contains("wine-dxmt") }, "missing overlay rebuilt: \(notes)")
+        let prefix = sb.paths.bottle("b")
+        XCTAssertEqual(sb.read(BackendFiles.system32(prefix).appendingPathComponent("winemetal.dll")), "dxmt64-winemetal.dll")
+        XCTAssertEqual(sb.read(BackendFiles.syswow64(prefix).appendingPathComponent("winemetal.dll")), "dxmt32-winemetal.dll")
+        XCTAssertEqual(try l.execute(p), 0)
+        let log = sb.read(p.logFile)
+        XCTAssertTrue(log.contains("# command: \(rt.dxmtWineRoot.appendingPathComponent("bin/wine").path) cmd.exe /c echo hi"), log)
+        XCTAssertTrue(log.contains("WINEDLLOVERRIDES=d3d10,d3d10_1,d3d10core,d3d11,d3d12,d3d12core,d3d8,d3d9,dxgi,winemetal=b"), log)
+    }
+
     func testFreshBottleWithRetinaOffSkipsRegistryWrite() throws {
         let sb = try Sandbox()
         let l = try setUp(sb)
@@ -201,8 +220,26 @@ final class DoctorAndLogsTests: XCTestCase {
         let errors = checks.filter { $0.status == .error }
         XCTAssertEqual(errors, [], "\(errors)")
         XCTAssertTrue(checks.contains { $0.status == .ok && $0.title == "D3DMetal (GPTK)" })
-        XCTAssertTrue(checks.contains { $0.status == .ok && $0.title.contains("DXMT 0.61") })
+        XCTAssertTrue(checks.contains { $0.status == .ok && $0.title.contains("DXMT 0.61") && $0.detail.hasPrefix("winemetal integrated") })
+        XCTAssertFalse(checks.contains { $0.title.contains("DXMT built for another Wine") })
         XCTAssertTrue(checks.contains { $0.status == .ok && $0.title.contains("Wine crossover-26.3.0-wow64") })
+    }
+
+    func testDoctorFlagsDXMTForAnotherWineAndStaleOverlay() throws {
+        let sb = try Sandbox()
+        let a = try sb.makeArchives()
+        let store = RuntimeStore(paths: sb.paths)
+        try store.install(sources: [a.wine])
+        let t = sb.root.appendingPathComponent("t", isDirectory: true)
+        try sb.makeDXMTTree(at: t.appendingPathComponent("dxmt"), builtAgainst: "wine-crossover-25.0.1-wow64")
+        let r = try store.install(sources: [t])
+        try FileManager.default.removeItem(at: try store.get(r.runtime).dxmtWineRoot)
+        var d = Doctor(paths: sb.paths, environment: [:])
+        d.rosettaInstalled = { nil }
+        let checks = d.run()
+        XCTAssertTrue(checks.contains { $0.status == .warning && $0.title.contains("DXMT built for another Wine")
+            && $0.detail.contains("wine-crossover-25.0.1-wow64") && $0.detail.contains("wine-crossover-26.3.0-wow64") }, "\(checks)")
+        XCTAssertTrue(checks.contains { $0.status == .warning && $0.title.contains("DXMT") && $0.detail.contains("missing or stale") })
     }
 
     func testDoctorFlagsBadGPTKAndMissingRuntimeForBottle() throws {
