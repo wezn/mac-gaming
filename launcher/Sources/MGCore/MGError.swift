@@ -45,12 +45,14 @@ public enum MGError: Error, CustomStringConvertible, Equatable {
     }
 }
 
-enum Names {
+public enum Names {
     /// Bottle and runtime names become directory names, so keep them boring.
-    static func validate(_ name: String) throws {
+    public static func validate(_ name: String) throws {
         let ok = !name.isEmpty && name.count <= 64
             && name.first.map { $0.isLetter || $0.isNumber } == true
             && name.unicodeScalars.allSatisfy { CharacterSet.alphanumerics.contains($0) && $0.isASCII || "._-".unicodeScalars.contains($0) }
         if !ok { throw MGError.invalidName(name) }
     }
+
+    public static func isValid(_ name: String) -> Bool { (try? validate(name)) != nil }
 }

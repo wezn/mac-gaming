@@ -41,3 +41,8 @@ public struct MGPaths: Sendable, Equatable {
     public func runtime(_ name: String) -> URL { runtimes.appendingPathComponent(name, isDirectory: true) }
     public func bottle(_ name: String) -> URL { bottles.appendingPathComponent(name, isDirectory: true) }
 }
+
+/// Shared by the CLI (`mg --version`) and the app bundle (`CFBundleShortVersionString`).
+public enum MGVersion {
+    public static let string = "0.1.0"
+}

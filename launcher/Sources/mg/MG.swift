@@ -13,7 +13,7 @@ struct MG: ParsableCommand {
         subcommands: [Run.self, BottleCommand.self, RuntimeCommand.self, SteamCommand.self, BattlenetCommand.self,
                       ConfigCommand.self, Detect.self, Doctor.self, Logs.self, Report.self]
     )
-    static let version = "0.1.0"
+    static let version = MGVersion.string
 }
 
 // MARK: shared helpers
@@ -129,13 +129,12 @@ struct Run: ParsableCommand {
         print("retina:    \(onOff(plan.retina))")
         for c in plan.setup.copies { print("copy:      \(c.source.path) -> \(c.destination.path)") }
         if let wd = plan.workingDirectory { print("cwd:       \(wd.path)") }
-        print("command:   \(([plan.executable.path] + plan.arguments).joined(separator: " "))")
+        print("command:   \(plan.commandLine)")
         print("log:       \(plan.logFile.path)")
         print("env (changed from the current environment):")
-        for (k, v) in plan.environment.sorted(by: { $0.key < $1.key }) where base[k] != v {
-            print("  \(k)=\(v)")
+        for c in plan.environmentChanges(from: base) {
+            print(c.value.map { "  \(c.key)=\($0)" } ?? "  unset \(c.key)")
         }
-        for k in base.keys.sorted() where plan.environment[k] == nil { print("  unset \(k)") }
     }
 }
 
@@ -184,26 +183,10 @@ struct BottleCommand: ParsableCommand {
 
         func run() throws {
             try guarded {
-                let launcher = Context.launcher
-                let config = try GlobalConfig.load(launcher.paths)
-                let rt = try launcher.runtimes.resolve(runtime, config: config)
-                let bottle = try launcher.bottles.create(BottleConfig(
-                    name: name, runtime: runtime, backend: backend, env: try EnvironmentBuilder.parseAssignments(env),
-                    msync: msync, retina: retina, metalHUD: hud))
-                if !noInit {
-                    Context.note("initialising \(bottle.prefix.path) with \(rt.name)")
-                    do {
-                        try launcher.initializePrefix(bottle, runtime: rt)
-                    } catch {
-                        try? launcher.bottles.delete(name)
-                        throw error
-                    }
-                }
-                if setDefault {
-                    var c = config
-                    c.defaultBottle = name
-                    try c.save(launcher.paths)
-                }
+                try Context.launcher.createBottle(
+                    BottleConfig(name: name, runtime: runtime, backend: backend, env: try EnvironmentBuilder.parseAssignments(env),
+                                 msync: msync, retina: retina, metalHUD: hud),
+                    initialize: !noInit, makeDefault: setDefault, log: { Context.note($0) })
                 print("created bottle \(name)")
             }
         }
@@ -254,18 +237,16 @@ struct BottleCommand: ParsableCommand {
 
         func run() throws {
             try guarded {
-                let store = BottleStore(paths: Context.paths)
-                var b = try store.get(name)
-                if let r = runtime {
-                    if r == "default" { b.config.runtime = nil } else { _ = try RuntimeStore(paths: Context.paths).get(r); b.config.runtime = r }
+                let assignments = try EnvironmentBuilder.parseAssignments(env)
+                let b = try Context.launcher.updateBottle(name) { c in
+                    if let r = runtime { c.runtime = r == "default" ? nil : r }
+                    if let v = backend { c.backend = v }
+                    if let v = msync { c.msync = v }
+                    if let v = retina { c.retina = v }
+                    if let v = hud { c.metalHUD = v }
+                    for (k, v) in assignments { c.env[k] = v }
+                    for k in unsetEnv { c.env[k] = nil }
                 }
-                if let v = backend { b.config.backend = v }
-                if let v = msync { b.config.msync = v }
-                if let v = retina { b.config.retina = v }
-                if let v = hud { b.config.metalHUD = v }
-                for (k, v) in try EnvironmentBuilder.parseAssignments(env) { b.config.env[k] = v }
-                for k in unsetEnv { b.config.env[k] = nil }
-                try store.save(b)
                 print((try? String(contentsOf: b.configFile, encoding: .utf8)) ?? "", terminator: "")
             }
         }
@@ -288,8 +269,7 @@ struct BottleCommand: ParsableCommand {
                         return
                     }
                 }
-                _ = try? launcher.stop(b, config: GlobalConfig.load(launcher.paths))
-                try launcher.bottles.delete(name)
+                try launcher.deleteBottle(name)
                 print("deleted bottle \(name)")
             }
         }
@@ -386,18 +366,9 @@ struct StoreInstall<S: StoreCommand>: ParsableCommand {
         let code: Int32 = try guarded {
             let launcher = Context.launcher
             let s = S.store
-            if !launcher.bottles.exists(bottle) {
-                let rt = try launcher.runtimes.resolve(nil, config: GlobalConfig.load(launcher.paths))
-                let b = try launcher.bottles.create(BottleConfig(name: bottle, backend: backend))
-                Context.note("created bottle '\(bottle)'")
-                try launcher.initializePrefix(b, runtime: rt)
-            }
-            let file = launcher.paths.cache.appendingPathComponent("installers/\(s.installerFileName)")
-            if redownload || !FileManager.default.fileExists(atPath: file.path) {
-                Context.note("downloading \(s.installerURL.absoluteString)")
-                try Downloader.download(s.installerURL, to: file)
-            }
-            let plan = try launcher.plan(RunRequest(bottle: bottle, backend: .wined3d, program: file.path, arguments: s.installerArguments))
+            let plan = try launcher.planStoreInstall(s, bottle: bottle, backend: backend, redownload: redownload,
+                                                     download: { try Downloader.download($0, to: $1) },
+                                                     log: { Context.note($0) })
             Context.note("running \(s.installerFileName); log: \(plan.logFile.path)")
             try launcher.prepare(plan, log: { Context.note($0) })
             let code = try launcher.execute(plan)
@@ -421,11 +392,7 @@ struct StoreRun<S: StoreCommand>: ParsableCommand {
         let code: Int32 = try guarded {
             let launcher = Context.launcher
             let s = S.store
-            let b = try launcher.bottles.get(bottle)
-            guard let exe = b.unixPath(forWindowsPath: s.clientPath), FileManager.default.fileExists(atPath: exe.path) else {
-                throw MGError.io("\(s.displayName) is not installed in bottle '\(bottle)': run `mg \(s.rawValue) install --bottle \(bottle)`")
-            }
-            let plan = try launcher.plan(RunRequest(bottle: bottle, backend: backend, program: exe.path, arguments: s.clientArguments + arguments))
+            let plan = try launcher.planStoreClient(s, bottle: bottle, backend: backend, arguments: arguments)
             Context.note("\(s.displayName): \(plan.choice.backend.rawValue) (\(plan.choice.reason)); log: \(plan.logFile.path)")
             try launcher.prepare(plan, log: { Context.note($0) })
             return try launcher.execute(plan, echo: verbose)
@@ -478,24 +445,13 @@ struct ConfigCommand: ParsableCommand {
         @Argument var value: String
         func run() throws {
             try guarded {
-                let paths = Context.paths
-                var c = try GlobalConfig.load(paths)
+                let launcher = Context.launcher
                 switch key {
                 case .gptk:
-                    let full = URL(fileURLWithPath: (value as NSString).expandingTildeInPath).standardizedFileURL.path
-                    guard let g = GPTKInstall.resolve(full) else {
-                        throw MGError.invalidConfig("\(full) does not look like a Game Porting Toolkit: expected lib/wine/x86_64-windows/d3d12.dll and lib/external/ (e.g. the mounted 'Evaluation environment for Windows games' volume or its redist/lib folder)")
-                    }
-                    c.gptkPath = full
-                    print("D3DMetal from \(g.libRoot.path)")
-                case .defaultRuntime:
-                    _ = try RuntimeStore(paths: paths).get(value)
-                    c.defaultRuntime = value
-                case .defaultBottle:
-                    _ = try BottleStore(paths: paths).get(value)
-                    c.defaultBottle = value
+                    if let g = try launcher.setGPTKPath(value) { print("D3DMetal from \(g.libRoot.path)") }
+                case .defaultRuntime: try launcher.setDefaultRuntime(value)
+                case .defaultBottle: try launcher.setDefaultBottle(value)
                 }
-                try c.save(paths)
             }
         }
     }
@@ -505,14 +461,12 @@ struct ConfigCommand: ParsableCommand {
         @Argument var key: Key
         func run() throws {
             try guarded {
-                let paths = Context.paths
-                var c = try GlobalConfig.load(paths)
+                let launcher = Context.launcher
                 switch key {
-                case .gptk: c.gptkPath = nil
-                case .defaultRuntime: c.defaultRuntime = nil
-                case .defaultBottle: c.defaultBottle = nil
+                case .gptk: try launcher.setGPTKPath(nil)
+                case .defaultRuntime: try launcher.setDefaultRuntime(nil)
+                case .defaultBottle: try launcher.setDefaultBottle(nil)
                 }
-                try c.save(paths)
             }
         }
     }

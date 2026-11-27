@@ -1,11 +1,12 @@
 # mg: the mac-gaming launcher
 
 `mg` runs Windows games on Apple Silicon Macs with the Wine build from this repo and a graphics
-backend picked per game. It is a Swift package with two targets:
+backend picked per game. It is a Swift package with three targets:
 
 - **MGCore**: all the logic (runtimes, bottles, backend selection, PE import scanning, environment
-  construction, process launch, doctor). It depends only on Foundation, so a SwiftUI app can use it directly.
+  construction, process launch, doctor). It depends only on Foundation.
 - **mg**: a thin command-line front end built on swift-argument-parser.
+- **MacGamingApp**: a SwiftUI app on top of MGCore (macOS only; see [App](#app)).
 
 ## Build
 
@@ -24,6 +25,54 @@ downloaded with a browser is quarantined and needs `xattr -d com.apple.quarantin
 
 **Testing on a Mac:** `scripts/mg-test-session.sh` downloads the newest mg, Wine and DXMT/DXVK builds, installs
 them into a throwaway root and walks through a checklist. See [docs/TESTING.md](../docs/TESTING.md).
+
+## App
+
+`MacGaming.app` is a native front end for the same bottles and runtimes: the app and `mg` share the
+data folder, so either can be used at any time.
+
+```sh
+cd launcher
+Scripts/make_app.sh            # swift build + bundle → build/MacGaming.app (ad-hoc signed)
+open build/MacGaming.app
+```
+
+Or download the `MacGaming-app` artifact from the latest [Launcher workflow](../.github/workflows/launcher.yml)
+run, unzip it, and clear the quarantine flag (the app is not notarized yet):
+`xattr -dr com.apple.quarantine MacGaming.app`.
+
+What it does (v1):
+
+- **Bottles** (sidebar): create (runs wineboot in the background), delete, and edit the runtime,
+  backend, msync, Retina, Metal HUD and environment variables. Edits are saved with Save (⌘S).
+- **Run…** (⌘R): pick an `.exe`/`.msi`/`.bat`, review the launch plan (detected DirectX level and
+  evidence, the chosen backend and why, warnings, DLL copies, the command, and every environment
+  variable that differs from the app's environment), change the bottle, backend or arguments
+  (re-planned as you edit), then Launch.
+- **Steam / Battle.net**: Install and Open buttons per bottle (same flow as `mg steam|battlenet install|run`).
+- **Wine Tools**: winecfg, regedit, explorer, taskmgr, notepad. **Stop All** runs `wineserver -k`.
+- **Runtimes**: install from a file picker or by dropping archives, zipped CI artifacts or folders;
+  make default; remove.
+- **Doctor**: the `mg doctor` checks. **Logs**: every run log, with a live tail.
+- **Activity**: each background job (wineboot, an install, a running program) with mg's progress
+  lines and its Wine log, tailing live. Settings (⌘,): GPTK path, default runtime and bottle.
+
+Long-running work never blocks the main thread: views call view models in the app target, which run
+MGCore's synchronous APIs through `Blocking.run` (MGCore/Async.swift: one thread per call, so waiting
+on Wine for hours does not tie up Swift's cooperative pool). `Subprocess.run(...) async` is also
+available and terminates the child when its task is cancelled. Logic the app needs beyond views
+(bottle/settings/store actions, `LaunchPlan.environmentChanges`, `LogTail`, `ArgumentSplitter`) lives
+in MGCore with unit tests, and the CLI uses the same code.
+
+The app target is only declared on macOS (`#if os(macOS)` in Package.swift), so `swift build` and
+`swift test` still work on Linux. CI builds the bundle on `macos-15`, launches it headlessly against a
+demo data folder (it must stay up for 8 seconds per screen), and uploads the app and screenshots.
+`-MGInitialSection runtimes|doctor|logs|bottle:<name>` and `-MGPreviewRun <exe>` choose the first
+screen (used for the screenshots).
+
+**Not done yet:** signing with a Developer ID, the hardened runtime and notarization need the owner's
+certificate and Apple ID (see the TODO in `Scripts/make_app.sh`). Quitting the app does not stop
+running games (use Stop All first).
 
 ## Quick start
 

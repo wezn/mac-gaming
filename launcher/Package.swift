@@ -29,3 +29,10 @@ let package = Package(
         ),
     ]
 )
+
+#if os(macOS)
+// The SwiftUI app (macOS only, so `swift build` / `swift test` keep working on Linux).
+// `Scripts/make_app.sh` wraps the binary into MacGaming.app.
+package.products.append(.executable(name: "MacGamingApp", targets: ["MacGamingApp"]))
+package.targets.append(.executableTarget(name: "MacGamingApp", dependencies: ["MGCore"]))
+#endif

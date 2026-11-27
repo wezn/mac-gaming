@@ -81,6 +81,115 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
+  app:
+    # Builds MacGaming.app, checks that it starts and stays up headlessly, takes screenshots,
+    # and uploads the (ad-hoc signed, not notarized) app so it can be tried.
+    name: Build the app (macOS)
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Cache SwiftPM
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: launcher/.build
+          key: spm-app-${{ runner.os }}-${{ hashFiles('launcher/Package.resolved') }}
+
+      - name: Build mg and MacGaming.app
+        working-directory: launcher
+        run: |
+          swift build -c release --product mg
+          BUILD_NUMBER="$GITHUB_RUN_NUMBER" Scripts/make_app.sh
+
+      - name: Inspect the bundle
+        working-directory: launcher
+        run: |
+          app=build/MacGaming.app
+          find "$app" -maxdepth 3 -print
+          plutil -p "$app/Contents/Info.plist"
+          codesign -dv "$app" 2>&1
+          file "$app/Contents/MacOS/MacGaming"
+          test -x "$app/Contents/MacOS/MacGaming"
+
+      - name: Seed a demo mg root
+        run: |
+          echo "MG_HOME=$RUNNER_TEMP/mg-demo" >> "$GITHUB_ENV"
+          export MG_HOME="$RUNNER_TEMP/mg-demo"
+          mg=launcher/.build/release/mg
+          # A fake runtime (wine just exits): enough for planning and for the UI to have content.
+          rt="$RUNNER_TEMP/demo-runtime"
+          mkdir -p "$rt/wine/bin" "$rt/wine/lib" "$rt/dxmt/x86_64-windows" "$rt/dxmt/i386-windows" \
+                   "$rt/dxmt/x86_64-unix" "$rt/dxvk/x64" "$rt/dxvk/x32"
+          printf '#!/bin/sh\nexit 0\n' > "$rt/wine/bin/wine"
+          cp "$rt/wine/bin/wine" "$rt/wine/bin/wineserver"
+          chmod +x "$rt/wine/bin/wine" "$rt/wine/bin/wineserver"
+          touch "$rt/wine/lib/libMoltenVK.dylib" "$rt/dxmt/x86_64-unix/winemetal.so"
+          for f in d3d11 dxgi d3d10core winemetal; do
+            touch "$rt/dxmt/x86_64-windows/$f.dll" "$rt/dxmt/i386-windows/$f.dll"
+          done
+          for f in d3d9 d3d10core d3d11 dxgi; do touch "$rt/dxvk/x64/$f.dll" "$rt/dxvk/x32/$f.dll"; done
+          $mg runtime install "$rt" --name crossover-demo
+          $mg bottle create overwatch --no-init --backend d3dmetal --set-default
+          $mg bottle create cs2 --no-init --backend dxmt --env DXMT_LOG_LEVEL=info --retina
+          $mg bottle create sandbox --no-init
+          mkdir -p "$RUNNER_TEMP/Games/Demo"
+          cp launcher/Tests/MGCoreTests/Fixtures/dx11.exe "$RUNNER_TEMP/Games/Demo/Demo.exe"
+          $mg bottle list
+
+      - name: Launch headlessly and take screenshots
+        run: |
+          app=launcher/build/MacGaming.app/Contents/MacOS/MacGaming
+          shots="$RUNNER_TEMP/screenshots"
+          mkdir -p "$shots"
+          # Each launch must stay up for 8 s (an early exit or crash fails the step), then a
+          # screenshot is taken. -MGInitialSection / -MGPreviewRun pick what the window shows.
+          shoot() {
+            local name=$1; shift
+            "$app" "$@" > "$shots/$name.log" 2>&1 &
+            local pid=$!
+            for _ in $(seq 1 8); do
+              if ! kill -0 "$pid" 2>/dev/null; then
+                code=0; wait "$pid" || code=$?
+                echo "::error::MacGaming exited early ($name, exit code $code)"
+                cat "$shots/$name.log"
+                exit 1
+              fi
+              sleep 1
+            done
+            screencapture -x "$shots/$name.png" || echo "::warning::screencapture failed for $name"
+            kill "$pid"
+            wait "$pid" 2>/dev/null || true
+            echo "$name: stayed up for 8 s"
+          }
+          shoot bottle -MGInitialSection bottle:overwatch
+          shoot run-plan -MGInitialSection bottle:sandbox -MGPreviewRun "$RUNNER_TEMP/Games/Demo/Demo.exe"
+          shoot runtimes -MGInitialSection runtimes
+          shoot doctor -MGInitialSection doctor
+          shoot logs -MGInitialSection logs
+          ls -l "$shots"
+
+      - name: Package the app
+        working-directory: launcher/build
+        run: ditto -c -k --keepParent MacGaming.app MacGaming.zip
+
+      - name: Upload the app
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: MacGaming-app
+          path: launcher/build/MacGaming.zip
+          if-no-files-found: error
+
+      - name: Upload screenshots
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: app-screenshots
+          path: ${{ runner.temp }}/screenshots
+          if-no-files-found: ignore
+
   smoke:
     # Runs mg against the real Wine build from the latest successful "Build Wine" run and the
     # real DXMT / DXVK-macOS builds from the latest successful "Build graphics layers" run.

@@ -19,9 +19,11 @@ public enum Subprocess {
     }
 
     /// Runs `executable` and waits. Returns the exit code, or 128 + signal number.
+    /// `onSpawn` is called with the child's pid right after it starts (the async overload uses it to cancel).
     @discardableResult
     public static func run(_ executable: URL, _ arguments: [String], environment: [String: String],
-                           workingDirectory: URL? = nil, output: Output = .inherit) throws -> Int32 {
+                           workingDirectory: URL? = nil, output: Output = .inherit,
+                           onSpawn: ((pid_t) -> Void)? = nil) throws -> Int32 {
         var fileFD: Int32 = -1
         var pipeFDs: [Int32] = [-1, -1]
         defer {
@@ -69,12 +71,33 @@ public enum Subprocess {
             posix_spawn_file_actions_addchdir_np(&actions, wd.path)
         }
 
+        // Start the child with no blocked signals and default handlers: a thread's mask and ignored
+        // signals are otherwise inherited, so a child spawned from a worker thread of a GUI app could
+        // not be stopped with SIGTERM.
+        #if canImport(Darwin)
+        var attr: posix_spawnattr_t?
+        #else
+        var attr = posix_spawnattr_t()
+        #endif
+        posix_spawnattr_init(&attr)
+        defer { posix_spawnattr_destroy(&attr) }
+        var noSignals = sigset_t()
+        sigemptyset(&noSignals)
+        posix_spawnattr_setsigmask(&attr, &noSignals)
+        var defaults = sigset_t()
+        sigemptyset(&defaults)
+        for sig in [SIGHUP, SIGINT, SIGQUIT, SIGPIPE, SIGALRM, SIGTERM, SIGCHLD, SIGUSR1, SIGUSR2, SIGTSTP, SIGTTIN, SIGTTOU] {
+            sigaddset(&defaults, sig)
+        }
+        posix_spawnattr_setsigdefault(&attr, &defaults)
+        posix_spawnattr_setflags(&attr, Int16(POSIX_SPAWN_SETSIGMASK | POSIX_SPAWN_SETSIGDEF))
+
         let argv = [executable.path] + arguments
         let envp = environment.map { "\($0.key)=\($0.value)" }.sorted()
         var pid = pid_t()
         let rc = withCStrings(argv) { cargv in
             withCStrings(envp) { cenv in
-                posix_spawn(&pid, executable.path, &actions, nil, cargv, cenv)
+                posix_spawn(&pid, executable.path, &actions, &attr, cargv, cenv)
             }
         }
         if tee { close(pipeFDs[1]) }
@@ -82,6 +105,7 @@ public enum Subprocess {
             if tee { close(pipeFDs[0]) }
             throw MGError.io("cannot start \(executable.path): \(String(cString: strerror(rc)))")
         }
+        onSpawn?(pid)
 
         guard tee else { return try wait(pid) }
 
