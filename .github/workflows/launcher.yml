@@ -1,0 +1,144 @@
+name: Launcher
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Least privilege: jobs only read the repo unless they say otherwise.
+permissions:
+  contents: read
+
+concurrency:
+  group: launcher-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Build and test (macOS)
+    runs-on: macos-15
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: launcher
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Toolchain
+        run: swift --version
+
+      - name: Cache SwiftPM
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: launcher/.build
+          key: spm-${{ runner.os }}-${{ hashFiles('launcher/Package.resolved') }}
+
+      - name: Build (release)
+        run: swift build -c release
+
+      - name: Test
+        run: swift test --parallel
+
+      - name: CLI sanity
+        run: |
+          .build/release/mg --version
+          .build/release/mg detect Tests/MGCoreTests/Fixtures/dx12.exe | grep -q "DirectX 12"
+
+  smoke:
+    # Runs mg against the real Wine build from the latest successful "Build Wine" run.
+    name: Smoke test with real Wine
+    needs: test
+    runs-on: macos-15
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      actions: read # download the artifact of another workflow run
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Use a throwaway mg root
+        run: echo "MG_HOME=$RUNNER_TEMP/mg" >> "$GITHUB_ENV"
+
+      - name: Ensure Rosetta 2
+        run: arch -x86_64 /usr/bin/true || sudo softwareupdate --install-rosetta --agree-to-license
+
+      - name: Cache SwiftPM
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: launcher/.build
+          key: spm-${{ runner.os }}-${{ hashFiles('launcher/Package.resolved') }}
+
+      - name: Build mg
+        working-directory: launcher
+        run: swift build -c release
+
+      - name: Download the latest Wine artifact
+        id: wine
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          run_id=$(gh run list --repo "$REPO" --workflow build-wine.yml --status success --limit 1 --json databaseId --jq '.[0].databaseId')
+          if [[ -z "$run_id" ]]; then
+            echo "::warning::No successful Build Wine run yet; skipping the smoke test"
+            echo "found=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "Using Build Wine run $run_id"
+          gh run download "$run_id" --repo "$REPO" --pattern 'wine-crossover-*' --dir "$RUNNER_TEMP/wine-artifact"
+          ls -lR "$RUNNER_TEMP/wine-artifact"
+          echo "found=true" >> "$GITHUB_OUTPUT"
+
+      - name: Install runtime and create a bottle
+        if: steps.wine.outputs.found == 'true'
+        run: |
+          mg=launcher/.build/release/mg
+          $mg runtime install "$RUNNER_TEMP/wine-artifact"
+          $mg runtime list
+          $mg bottle create test
+          $mg bottle list
+          $mg doctor || true
+
+      - name: Run a console program
+        if: steps.wine.outputs.found == 'true'
+        run: |
+          mg=launcher/.build/release/mg
+          $mg run --bottle test --backend wined3d cmd.exe /c echo mg-smoke-ok
+          $mg logs --last
+          $mg logs --last | grep -q mg-smoke-ok
+
+      - name: Run notepad.exe headlessly
+        if: steps.wine.outputs.found == 'true'
+        run: |
+          mg=launcher/.build/release/mg
+          $mg run --bottle test --backend wined3d notepad.exe &
+          pid=$!
+          # notepad never exits on its own, so "still running after 30 s" means it started and
+          # stayed up. An early exit (missing libs, mac driver failure) fails the step.
+          alive=true
+          for _ in $(seq 1 30); do
+            if ! kill -0 "$pid" 2>/dev/null; then alive=false; break; fi
+            sleep 1
+          done
+          pgrep -fl 'notepad.exe' || true
+          $mg bottle stop test || true
+          for _ in $(seq 1 30); do kill -0 "$pid" 2>/dev/null || break; sleep 1; done
+          kill -9 "$pid" 2>/dev/null || true
+          $mg logs --last
+          if [[ "$alive" != true ]]; then
+            code=0; wait "$pid" || code=$?
+            echo "::error::notepad.exe exited early (mg exit code $code)"; exit 1
+          fi
+
+      - name: Upload logs
+        if: always() && steps.wine.outputs.found == 'true'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: smoke-logs
+          path: ${{ runner.temp }}/mg/logs
+          if-no-files-found: ignore
