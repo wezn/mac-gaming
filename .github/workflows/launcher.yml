@@ -267,7 +267,11 @@ jobs:
           # a URL the runner itself cannot reach (blocked datacenter IPs) is not held against Wine.
           # Any HTTP status means the TLS handshake worked.
           mg=launcher/.build/release/mg
-          urls=(https://store.steampowered.com/ https://www.battle.net/ https://us.battle.net/ https://www.blizzard.com/ https://example.com/)
+          # Not www.battle.net: it redirects to "https://shop.battle.net?from=root" (no "/" before "?"),
+          # which Wine's WinHTTP resolves as host "shop.battle.net?from=root" and fails on DNS.
+          urls=(https://store.steampowered.com/ https://us.battle.net/ https://oauth.battle.net/
+                https://account.battle.net/ https://download.battle.net/ https://blzddist1-a.akamaihd.net/
+                https://www.blizzard.com/ https://example.com/)
           js="$RUNNER_TEMP/https.js"
           {
             echo 'var urls = WScript.Arguments, failed = 0;'
