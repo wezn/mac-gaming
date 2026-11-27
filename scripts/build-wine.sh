@@ -28,6 +28,10 @@ JOBS="$(sysctl -n hw.ncpu)"
 BREW=/opt/homebrew/bin/brew
 MVK_VERSION=1.4.2
 MVK_SHA256=f95765a6229cb7b915990a2890ce12ebe36a730b021545d3d52ae69ce4c4024e
+# CrossOver's sources/gnutls/nettle lacks its top-level Makefile.in, so nettle comes from the
+# GNU release (same configure.ac as CrossOver's copy).
+NETTLE_VERSION=3.10
+NETTLE_SHA256=b4c518adb174e484cb4acea54118f02380c7133771e7e9beb98a0787194ee47c
 
 [[ "$(uname -s)" == Darwin ]] || { echo "must run on macOS" >&2; exit 1; }
 [[ -x "$BREW" ]] || { echo "arm64 Homebrew not found at /opt/homebrew" >&2; exit 1; }
@@ -38,7 +42,7 @@ echo "==> Installing missing build tools (arm64 Homebrew)"
 export HOMEBREW_NO_AUTO_UPDATE=1 HOMEBREW_NO_INSTALL_UPGRADE=1 \
   HOMEBREW_NO_INSTALLED_DEPENDENTS_CHECK=1 HOMEBREW_NO_INSTALL_CLEANUP=1
 missing=()
-for f in autoconf bison flex gettext mingw-w64 pkgconf cmake; do
+for f in bison flex gettext mingw-w64 pkgconf cmake; do
   "$BREW" list --formula --versions "$f" >/dev/null || missing+=("$f")
 done
 if (( ${#missing[@]} )); then "$BREW" install --quiet "${missing[@]}"; fi
@@ -92,7 +96,7 @@ export LDFLAGS="-L$DEPS/lib -Wl,-headerpad_max_install_names -Wl,-rpath,@loader_
 
 # GnuTLS is what Wine's schannel (secur32) and bcrypt use for TLS and crypto. Without it,
 # every HTTPS request made through WinHTTP/WinINet fails, and Battle.net and Steam report
-# "no internet". CrossOver's sources bundle GMP, nettle and GnuTLS; build them as x86_64
+# "no internet". GMP and GnuTLS come from CrossOver's sources, nettle from GNU; build them as x86_64
 # dylibs and ship them in lib/. Wine dlopens libgnutls.30.dylib by name, and mg puts lib/
 # on DYLD_FALLBACK_LIBRARY_PATH.
 echo "==> Building x86_64 GMP, nettle and GnuTLS"
@@ -100,7 +104,15 @@ TLS_HOST=x86_64-apple-darwin
 (cd "$WORK/src/gnutls/gmp" && arch -x86_64 ./configure --host=$TLS_HOST --build=$TLS_HOST --prefix="$DEPS" \
    --enable-shared --disable-static --disable-assembly \
  && arch -x86_64 make -j"$JOBS" && arch -x86_64 make install)
-(cd "$WORK/src/gnutls/nettle" && autoconf && autoheader \
+NETTLE_TAR="$CACHE/nettle-$NETTLE_VERSION.tar.gz"
+if [[ ! -f "$NETTLE_TAR" ]]; then
+  curl -fL --retry 3 -o "$NETTLE_TAR.part" "https://ftp.gnu.org/gnu/nettle/nettle-$NETTLE_VERSION.tar.gz"
+  mv "$NETTLE_TAR.part" "$NETTLE_TAR"
+fi
+echo "$NETTLE_SHA256  $NETTLE_TAR" | shasum -a 256 -c
+rm -rf "$WORK/src/nettle" && mkdir "$WORK/src/nettle"
+tar -xzf "$NETTLE_TAR" -C "$WORK/src/nettle" --strip-components=1
+(cd "$WORK/src/nettle" \
  && arch -x86_64 ./configure --host=$TLS_HOST --build=$TLS_HOST --prefix="$DEPS" --libdir="$DEPS/lib" \
    --enable-shared --disable-static --disable-documentation --disable-openssl \
  && arch -x86_64 make -j"$JOBS" && arch -x86_64 make install)
