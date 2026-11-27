@@ -154,5 +154,12 @@ Optional environment variables:
 `tests/d3d11-smoke.c` (64- and 32-bit), which loads `d3d11.dll`, checks that the expected
 backend was loaded (`winemetal.dll` present for DXMT, the DXVK banner in the log for DXVK),
 creates a D3D11 device and clears a render target. Logs are uploaded as `smoke-test-logs`.
-A backend whose DLLs do not load fails the job. A device that cannot be created on the CI
-VM's virtual GPU only produces a warning (`STRICT_DEVICE=1` makes it fatal).
+A backend whose DLLs do not load fails the job, and so does a device that cannot be
+created: CI sets `STRICT_DEVICE=1`. The runner's "Apple Paravirtual device" (GPU family
+Apple 5, so DXMT logs "Experimental non-Apple GPU support") creates feature level 11_0
+devices on both backends. Run locally without `STRICT_DEVICE`, the script only warns on
+device failures.
+
+This proves the install recipe and that both backends initialise against our Wine. It does
+not present a swapchain or render to a window, so it is not a compatibility or performance
+test. Test real games on real Apple Silicon hardware.

@@ -16,6 +16,7 @@
 #   bin/winebuild, lib/wine/{x86_64,i386}-windows/lib{winecrt0,ntdll,dbghelp}.a and
 #   lib/wine/x86_64-unix/{ntdll,winemac}.so. Build it with WINE_DEVEL=1 scripts/build-wine.sh.
 # Env: LLVM_PREFIX (default: $CACHE/llvm-15.0.7-x86_64, built by scripts/build-llvm.sh if absent)
+#      WINE_LABEL  (recorded in dxmt/VERSION, e.g. "wine-crossover-26.3.0-wow64")
 set -euo pipefail
 
 DXMT_TAG=v0.80
@@ -107,7 +108,7 @@ file "$PKG/x86_64-unix/winemetal.so" | grep -q 'x86_64' || { echo "winemetal.so 
 cp LICENSE "$PKG/LICENSE"
 cp dxmt.conf "$PKG/dxmt.conf"
 printf 'DXMT %s (%s)\nhttps://github.com/3Shain/dxmt\nBuilt against Wine: %s\n' \
-  "$DXMT_TAG" "$DXMT_COMMIT" "$("$WINE_DIR/bin/winebuild" --version 2>/dev/null | head -1 || echo unknown)" \
+  "$DXMT_TAG" "$DXMT_COMMIT" "${WINE_LABEL:-$("$WINE_DIR/bin/winebuild" --version 2>/dev/null | head -1 || echo unknown)}" \
   > "$PKG/VERSION"
 (cd "$PKG" && find . -type f | sort && file x86_64-windows/*.dll i386-windows/*.dll x86_64-unix/*.so)
 

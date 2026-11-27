@@ -136,7 +136,9 @@ jobs:
 
       - name: Build DXMT
         id: build
-        run: LLVM_PREFIX="$HOME/llvm-x86_64" scripts/build-dxmt.sh build/wine-sdk
+        run: |
+          LLVM_PREFIX="$HOME/llvm-x86_64" WINE_LABEL="wine-crossover-$CX_VERSION-wow64" \
+            scripts/build-dxmt.sh build/wine-sdk
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
@@ -195,6 +197,9 @@ jobs:
         env:
           DXMT_NAME: ${{ needs.dxmt.outputs.name }}
           DXVK_NAME: ${{ needs.dxvk.outputs.name }}
+          # The runner's paravirtual GPU can create D3D11 devices on both backends,
+          # so a device-creation failure here is a real regression.
+          STRICT_DEVICE: "1"
         run: |
           scripts/smoke-test-graphics.sh \
             "build/in/wine-crossover-$CX_VERSION-wow64.tar.xz" \
