@@ -13,7 +13,11 @@ shot() {
   local stage=$1 name=$2
   screencapture -x "$SHOTS/$name.png" || true
   { echo "== $name $(date +%T)"; "$WINLIST" || true; } >> "$PROBE/$stage-windows.txt"
+  echo "$name $("$WINLIST" --lit "$SHOTS/$name.png" 'Sign in to Steam' 2>&1 || true)" >> "$PROBE/$stage-lit.txt"
 }
+
+# The login window in the last screenshot of a stage: how much of it is not black.
+lit() { tail -n 1 "$PROBE/$1-lit.txt" 2>/dev/null | cut -d' ' -f2- || true; }
 
 # Starts steam.exe with $CLIENT_ARGS and crash tracing, in the background, and finds its mgx log.
 start_steam() {

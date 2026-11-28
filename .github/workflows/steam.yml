@@ -37,7 +37,11 @@ jobs:
         include:
           # args: steam.exe switches; "-cef-disable-gpu-compositing -cef-in-process-gpu" is what
           # `mgx steam run` passes (Store.steam.clientArguments). env: extra bottle environment.
-          - { name: wined3d-mgx, backend: wined3d, args: "-cef-disable-gpu-compositing -cef-in-process-gpu", env: "" }
+          - { name: wined3d-underlays, backend: wined3d, args: "-cef-disable-gpu-compositing -cef-force-browser-underlays", env: "" }
+          - { name: wined3d-no-occlusion, backend: wined3d, args: "-cef-disable-gpu-compositing -cef-disable-occlusion", env: "" }
+          - { name: wined3d-opaque, backend: wined3d, args: "-cef-disable-gpu-compositing -cef-force-opaque-backgrounds", env: "" }
+          - { name: dxmt-vulkan, backend: dxmt, args: "-cef-use-vulkan", env: "" }
+          - { name: dxmt-underlays, backend: dxmt, args: "-cef-force-browser-underlays", env: "" }
     defaults:
       run:
         shell: bash # -eo pipefail
@@ -199,6 +203,7 @@ jobs:
             echo "| steamwebhelper main processes started | $(webhelper_starts update) | $(webhelper_starts client) |"
             echo "| \"cross-process swapchain\" (DXMT) | $(swapchain update) | $(swapchain client) |"
             echo "| steam.exe / steamwebhelper processes alive at the end | $(alive update) | $(alive client) |"
+            echo "| \"Sign in to Steam\" window in the last screenshot (not black) | $(lit update) | $(lit client) |"
             for stage in client update; do
               f=$(logpath "$stage")
               [[ -f "$f" ]] || continue
