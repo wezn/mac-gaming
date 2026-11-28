@@ -30,6 +30,8 @@ BIN=$(swift build -c "$CONFIG" --show-bin-path)
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN/MacGamingApp" "$APP/Contents/MacOS/MacGaming"
+# Licenses of everything the app and its runtimes ship (Acknowledgements window, `mgx licenses`).
+cp ../THIRD_PARTY_NOTICES.md "$APP/Contents/Resources/"
 
 ICON_KEY=""
 ICONSET="$OUT/AppIcon.iconset"
