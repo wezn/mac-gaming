@@ -38,14 +38,24 @@ public enum Store: String, CaseIterable, Sendable {
         self == .battlenet ? ["WINE_SIMULATE_WRITECOPY": "1"] : [:]
     }
 
-    /// Chromium switches for the client's built-in browser under Wine on macOS (Steam spells them with `-cef-`).
+    /// Chromium switches for the client's built-in browser under Wine on macOS.
+    ///
     /// Battle.net: Battle.net Launcher.exe passes them on to Battle.net.exe. Without --in-process-gpu, DXMT
     /// cannot present from Chromium's GPU process ("cross-process swapchain not supported yet") and the
     /// window freezes; with it alone the window stays black; with --disable-gpu-compositing as well the login
     /// window renders on DXMT and wined3d. Verified by the Battle.net probe workflow.
+    ///
+    /// Steam spells its switches `-cef-…` and maps only the ones it knows onto steamwebhelper.exe. It still
+    /// honours `-cef-disable-gpu-compositing` (it then skips the GPU attempt, which on DXMT fails with
+    /// "cross-process swapchain" and is turned off by Steam's own runtime check after ~45 s), but it ignores
+    /// `-cef-in-process-gpu` and `-cef-single-process`: Chromium's display compositor always runs in a separate
+    /// GPU process and draws into the browser process's window. Wine's macOS driver shows nothing drawn into
+    /// another process's window, so Steam's login window opens but stays black on DXMT and wined3d, with every
+    /// switch Steam knows. Verified by the Steam probe workflow (`.github/workflows/steam.yml`). Fixing it needs
+    /// Wine to start steamwebhelper with --in-process-gpu, or cross-process drawing in winemac.drv.
     public var clientArguments: [String] {
         switch self {
-        case .steam: return ["-cef-disable-gpu-compositing", "-cef-in-process-gpu"]
+        case .steam: return ["-cef-disable-gpu-compositing"]
         case .battlenet: return ["--in-process-gpu", "--disable-gpu-compositing"]
         }
     }

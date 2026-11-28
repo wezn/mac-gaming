@@ -201,6 +201,13 @@ cannot present from Chromium's separate GPU process). The Battle.net probe workf
 (`.github/workflows/battlenet.yml`) checks both on a CI Mac. The installer starts the client once
 without these switches; if that window freezes, quit it and use `mgx battlenet run`.
 
+**Steam does not render yet.** `mgx steam install` (silent) and Steam's self-update work, and
+`mgx steam run` starts the client with `-cef-disable-gpu-compositing`, but the "Sign in to Steam" window
+stays black on DXMT and wined3d. Steam ignores `-cef-in-process-gpu` (and has no other switch for it),
+so Chromium's separate GPU process draws into the client's window, and Wine's macOS driver does not show
+drawing into another process's window. The Steam probe workflow (`.github/workflows/steam.yml`) records
+this on a CI Mac with screenshots, the window list and Steam's own logs.
+
 ### Per-game overrides
 
 `overrides.json` in the mgx root, merged over the built-in table and keyed by executable name

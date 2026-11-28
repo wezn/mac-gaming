@@ -131,6 +131,15 @@ final class ActionsTests: XCTestCase {
         XCTAssertEqual(p.programName, "Battle.net Launcher.exe")
         XCTAssertEqual(p.environment["WINE_SIMULATE_WRITECOPY"], "1", "added to bottles that predate it")
         XCTAssertEqual(try l.bottles.get("bn").config.env["WINE_SIMULATE_WRITECOPY"], "1", "saved, so games get it too")
+
+        // Steam ignores -cef-in-process-gpu (Steam probe workflow), so only the compositing switch is passed.
+        let st = try l.createBottle(BottleConfig(name: "st", backend: .dxmt), initialize: false)
+        try sb.write(#"Program Files (x86)/Steam/steam.exe"#, "MZ", in: st.root.appendingPathComponent("drive_c"))
+        let sp = try l.planStoreClient(.steam, bottle: "st", arguments: ["-silent"])
+        XCTAssertEqual(Array(sp.arguments.suffix(2)), ["-cef-disable-gpu-compositing", "-silent"])
+        XCTAssertFalse(sp.arguments.contains("-cef-in-process-gpu"))
+        XCTAssertEqual(sp.programName, "steam.exe")
+        XCTAssertEqual(try l.bottles.get("st").config.env, [:], "Steam needs no bottle environment")
     }
 
     func testStoreEnvironmentIsSavedAndKeepsUserValues() throws {

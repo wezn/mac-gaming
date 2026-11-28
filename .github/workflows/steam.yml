@@ -1,10 +1,11 @@
 name: Steam probe
 
 # Installs the real Steam client with mgx (`SteamSetup.exe /S`, as `mgx steam install` does) and the
-# latest Wine / DXMT / DXVK builds, lets it update itself (~300 MB on the first start), starts it again
+# latest Wine / DXMT / DXVK builds, lets it update itself (~575 MB in two rounds on the first start), starts it again
 # and records what happens: crashes (winedbg in auto mode), steamwebhelper (Steam's Chromium UI)
 # restarts, DXMT's "cross-process swapchain" errors, which processes are still alive, and screenshots.
-# No account or login is involved: the client is expected to reach its login window.
+# No account or login is involved: the client is expected to reach its login window, and the job
+# summary says how much of that window is not black (it is all black so far, see the matrix).
 # A diagnostic, not a gate: a crashing client is reported in the job summary, not as a failure.
 # It depends on Valve's servers, so it only runs by hand or when this file changes.
 
@@ -35,13 +36,20 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # args: steam.exe switches; "-cef-disable-gpu-compositing -cef-in-process-gpu" is what
-          # `mgx steam run` passes (Store.steam.clientArguments). env: extra bottle environment.
-          - { name: wined3d-underlays, backend: wined3d, args: "-cef-disable-gpu-compositing -cef-force-browser-underlays", env: "" }
-          - { name: wined3d-no-occlusion, backend: wined3d, args: "-cef-disable-gpu-compositing -cef-disable-occlusion", env: "" }
-          - { name: wined3d-opaque, backend: wined3d, args: "-cef-disable-gpu-compositing -cef-force-opaque-backgrounds", env: "" }
-          - { name: dxmt-vulkan, backend: dxmt, args: "-cef-use-vulkan", env: "" }
-          - { name: dxmt-underlays, backend: dxmt, args: "-cef-force-browser-underlays", env: "" }
+          # args: steam.exe switches (dxmt and wined3d: what `mgx steam run` passes, Store.steam.clientArguments).
+          # env: extra bottle environment. Results so far (PR #20): the login window opens on screen but
+          # stays black on both backends with every switch Steam knows (the "CEF switches" step lists
+          # them). Steam ignores -cef-in-process-gpu, -cef-single-process and -cef-disable-d3d11, so
+          # Chromium's GPU process draws into the browser's window, which winemac.drv does not show.
+          # -cef-disable-gpu-compositing (and -cef-disable-gpu) make Steam skip the GPU attempt; without
+          # them DXMT logs "cross-process swapchain not supported yet" and Steam turns GPU off itself after
+          # ~45 s. Also tried, no change: WINE_SIMULATE_WRITECOPY=1 (no crashes without it either),
+          # -cef-disable-sandbox -no-cef-sandbox, -cef-disable-occlusion, -cef-force-opaque-backgrounds,
+          # -cef-force-browser-underlays, -cef-use-vulkan. No crashes in any variant. In 4 of 20 runs (both
+          # backends) the updater hung at "Cleaning up..." / "launching Steam..."; the next start was fine.
+          - { name: dxmt, backend: dxmt, args: "-cef-disable-gpu-compositing", env: "" }
+          - { name: wined3d, backend: wined3d, args: "-cef-disable-gpu-compositing", env: "" }
+          - { name: dxmt-no-switches, backend: dxmt, args: "", env: "" }
     defaults:
       run:
         shell: bash # -eo pipefail
