@@ -51,6 +51,14 @@ extension Launcher {
 
     // MARK: settings
 
+    /// Sets (or with nil, clears) where updates come from. Validated, stored as given.
+    public func setUpdateURL(_ value: String?) throws {
+        if let value { _ = try UpdateSource(string: value) }
+        var c = try GlobalConfig.load(paths)
+        c.updateURL = value
+        try c.save(paths)
+    }
+
     /// Sets (or with nil, clears) the Game Porting Toolkit path. Returns the resolved install.
     @discardableResult
     public func setGPTKPath(_ path: String?) throws -> GPTKInstall? {

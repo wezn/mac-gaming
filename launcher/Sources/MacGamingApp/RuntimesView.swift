@@ -10,9 +10,10 @@ struct RuntimesView: View {
         VStack(spacing: 0) {
             List {
                 if model.runtimes.isEmpty {
-                    Text("No runtime installed yet. Download the Wine build (and optionally DXMT and DXVK) from this repository's “Build Wine” workflow, then drop the files below.")
-                        .foregroundStyle(.secondary)
+                    RuntimeDownloadCard()
                         .padding(.vertical, 6)
+                } else {
+                    RuntimeUpdateRow(model: model, style: .banner)
                 }
                 ForEach(model.runtimes, id: \.name) { rt in
                     RuntimeRow(runtime: rt, isDefault: rt.name == model.defaultRuntimeName,

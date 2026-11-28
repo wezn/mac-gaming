@@ -26,6 +26,8 @@ public struct Doctor {
     public var machine: String
     /// nil = not macOS (Rosetta is not applicable).
     public var rosettaInstalled: () -> Bool?
+    /// Compared with the cached release manifest.
+    public var currentVersion = MGVersion.string
 
     public init(paths: MGPaths, environment: [String: String] = ProcessInfo.processInfo.environment) {
         self.paths = paths
@@ -189,6 +191,9 @@ public struct Doctor {
         do { _ = try GameOverrideTable.load(paths) } catch {
             out.append(.init(.error, "overrides.json", "\(error)"))
         }
+        // From the last manifest fetched (by `mgx runtime update --check`, `mgx self-update` or the app's
+        // update check); the doctor never goes online.
+        out += Updater.doctorChecks(paths: paths, currentVersion: currentVersion)
         return out
     }
 }

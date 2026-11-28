@@ -98,11 +98,14 @@ public struct GlobalConfig: Codable, Equatable, Sendable {
     public var defaultBottle: String?
     /// Path to the user's Game Porting Toolkit (the folder holding `redist/lib`, the `lib` folder itself, or the app).
     public var gptkPath: String?
+    /// Where updates come from (see `UpdateSource`); nil = this repository's GitHub releases.
+    public var updateURL: String?
 
-    public init(defaultRuntime: String? = nil, defaultBottle: String? = nil, gptkPath: String? = nil) {
+    public init(defaultRuntime: String? = nil, defaultBottle: String? = nil, gptkPath: String? = nil, updateURL: String? = nil) {
         self.defaultRuntime = defaultRuntime
         self.defaultBottle = defaultBottle
         self.gptkPath = gptkPath
+        self.updateURL = updateURL
     }
 
     public static func load(_ paths: MGPaths) throws -> GlobalConfig {
