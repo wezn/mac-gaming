@@ -36,7 +36,7 @@ these names must not change:
   "app": { "file": "MacGaming-0.1.0.zip", "sha256": "…" },
   "mgx": { "file": "mgx-0.1.0-macos-arm64.tar.gz", "sha256": "…" },
   "runtime": [
-    { "kind": "wine", "file": "wine-crossover-26.3.0-wow64.tar.xz", "version": "26.3.0", "sha256": "…" },
+    { "kind": "wine", "file": "wine-crossover-26.3.0-wow64.tar.xz", "version": "crossover-26.3.0-wow64", "sha256": "…" },
     { "kind": "dxmt", "file": "dxmt-0.80.tar.xz", "version": "0.80", "sha256": "…" },
     { "kind": "dxvk", "file": "dxvk-macos-1.10.3-20230507-repack.tar.xz", "version": "1.10.3-20230507-repack", "sha256": "…" }
   ]

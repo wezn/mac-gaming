@@ -29,8 +29,11 @@ import re
 import sys
 
 OUTPUTS = {"SHA256SUMS", "manifest.json"}
-RUNTIME = [  # (kind, file-name pattern); the group is the component's version
-    ("wine", re.compile(r"^wine-crossover-(\d[0-9A-Za-z.]*)-wow64\.tar\.xz$")),
+# (kind, file-name pattern); the group is the component's version, spelled exactly as mgx records it on
+# install (RuntimeComponent.version(fromArchive:) in launcher/Sources/MGCore/Runtime.swift), so an updater
+# can compare the two: wine-crossover-26.3.0-wow64.tar.xz -> crossover-26.3.0-wow64.
+RUNTIME = [
+    ("wine", re.compile(r"^wine-(crossover-\d[0-9A-Za-z.]*-wow64)\.tar\.xz$")),
     ("dxmt", re.compile(r"^dxmt-(\d[0-9A-Za-z.+-]*)\.tar\.xz$")),
     ("dxvk", re.compile(r"^dxvk-macos-(\d[0-9A-Za-z.+-]*)\.tar\.xz$")),
 ]
