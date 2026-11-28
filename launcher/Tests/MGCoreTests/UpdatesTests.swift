@@ -10,7 +10,7 @@ final class UpdatesTests: XCTestCase {
      "mgx":{"file":"mgx-0.2.0-macos-arm64.tar.gz","sha256":"\(String(repeating: "B", count: 64))"},
      "runtime":[
        {"kind":"dxvk","file":"dxvk-macos-1.10.3-20230507-repack.tar.xz","version":"1.10.3-20230507-repack","sha256":"\(String(repeating: "c", count: 64))"},
-       {"kind":"wine","file":"wine-crossover-26.3.0-wow64.tar.xz","version":"26.3.0","sha256":"\(String(repeating: "d", count: 64))"},
+       {"kind":"wine","file":"wine-crossover-26.3.0-wow64.tar.xz","version":"crossover-26.3.0-wow64","sha256":"\(String(repeating: "d", count: 64))"},
        {"kind":"metalfx","file":"metalfx-1.tar.xz","version":"1","sha256":"\(String(repeating: "e", count: 64))"},
        {"kind":"dxmt","file":"dxmt-0.80.tar.xz","version":"0.80","sha256":"\(String(repeating: "f", count: 64)) ","extra":true}
      ],
@@ -27,7 +27,7 @@ final class UpdatesTests: XCTestCase {
         XCTAssertEqual(m.runtime.count, 4)
         // Known kinds only, in install order; an unknown kind from a newer release is skipped.
         XCTAssertEqual(m.runtimeComponents.map(\.kind), ["wine", "dxmt", "dxvk"])
-        XCTAssertEqual(m.runtimeComponents[0].version, "26.3.0")
+        XCTAssertEqual(m.runtimeComponents[0].version, "crossover-26.3.0-wow64")
 
         let minimal = try ReleaseManifest.decode(Data(#"{"version":"1.0.0"}"#.utf8))
         XCTAssertEqual(minimal.runtime, [])
@@ -256,7 +256,7 @@ final class UpdatesTests: XCTestCase {
             fetched.append($0.lastPathComponent)
             try Downloader.download($0, to: $1, quiet: true)
         })
-        let m = try runtimeManifest([("wine", a.wine, "26.3.0"), ("dxmt", a.dxmt, "0.61"), ("dxvk", a.dxvk, "1.10.3")])
+        let m = try runtimeManifest([("wine", a.wine, "crossover-26.3.0-wow64"), ("dxmt", a.dxmt, "0.61"), ("dxvk", a.dxvk, "1.10.3")])
 
         let plan = try u.planRuntimeUpdate(m)
         XCTAssertEqual(plan.runtime, "crossover-26.3.0-wow64")
@@ -291,13 +291,18 @@ final class UpdatesTests: XCTestCase {
             fetched.append($0.lastPathComponent)
             try Downloader.download($0, to: $1, quiet: true)
         })
-        let m2 = try runtimeManifest([("wine", a.wine, "26.3.0"), ("dxmt", dxmt2, "0.62"), ("dxvk", a.dxvk, "1.10.3")], version: "1.1.0")
+        let m2 = try runtimeManifest([("wine", a.wine, "crossover-26.3.0-wow64"), ("dxmt", dxmt2, "0.62"), ("dxvk", a.dxvk, "1.10.3")], version: "1.1.0")
         let plan2 = try u2.planRuntimeUpdate(m2)
         XCTAssertEqual(plan2.install.map(\.kind), ["dxmt"])
         XCTAssertEqual(plan2.current.map(\.kind), ["wine", "dxvk"])
         let r2 = try XCTUnwrap(try u2.updateRuntime(m2, plan: plan2))
         XCTAssertEqual(r2.installed.keys.sorted(), ["dxmt"])
         XCTAssertEqual(fetched, ["dxmt-0.62.tar.xz"])
+
+        // The recorded version alone is enough (release-manifest.py spells it like runtime.json does).
+        var renamed = m2
+        renamed.runtime[2].file = "dxvk-macos-1.10.3-renamed.tar.xz"
+        XCTAssertEqual(try u2.planRuntimeUpdate(renamed).install, [])
         XCTAssertEqual(sb.read(rt.dxmtRoot.appendingPathComponent("x86_64-windows/d3d11.dll")), "dxmt-0.62")
         XCTAssertTrue(BackendFiles.isDXMTOverlayCurrent(rt), "the DXMT overlay is rebuilt")
     }
@@ -307,7 +312,7 @@ final class UpdatesTests: XCTestCase {
         let a = try sb.makeArchives()
         let src = try release(sb, [a.wine, a.dxmt, a.dxvk])
         let u = Updater(paths: sb.paths, source: src)
-        var m = try runtimeManifest([("wine", a.wine, "26.3.0"), ("dxmt", a.dxmt, "0.61"), ("dxvk", a.dxvk, "1.10.3")])
+        var m = try runtimeManifest([("wine", a.wine, "crossover-26.3.0-wow64"), ("dxmt", a.dxmt, "0.61"), ("dxvk", a.dxvk, "1.10.3")])
         m.runtime[2].sha256 = String(repeating: "1", count: 64)
         XCTAssertThrowsError(try u.updateRuntime(m, plan: try u.planRuntimeUpdate(m)))
         XCTAssertEqual(RuntimeStore(paths: sb.paths).list(), [], "nothing is installed when any file fails verification")
@@ -335,7 +340,7 @@ final class UpdatesTests: XCTestCase {
         XCTAssertEqual(Updater.doctorChecks(paths: sb.paths), [], "no cached manifest: nothing, and no network")
 
         let a = try sb.makeArchives()
-        let m = try runtimeManifest([("wine", a.wine, "26.3.0")], version: "9.0.0")
+        let m = try runtimeManifest([("wine", a.wine, "crossover-26.3.0-wow64")], version: "9.0.0")
         try UpdateCache(paths: sb.paths).save(m, source: .default)
         var checks = Updater.doctorChecks(paths: sb.paths, currentVersion: "0.1.0")
         XCTAssertEqual(checks.map(\.status), [.warning, .warning])

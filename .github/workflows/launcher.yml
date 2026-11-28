@@ -74,7 +74,7 @@ jobs:
           mg=.build/release/mgx
 
           $mg runtime update --check | tee "$RUNNER_TEMP/check.txt"
-          grep -q "available: wine 26.3.0" "$RUNNER_TEMP/check.txt"
+          grep -q "available: wine crossover-26.3.0-wow64" "$RUNNER_TEMP/check.txt"
           $mg runtime update
           $mg runtime list | tee "$RUNNER_TEMP/list.txt"
           grep -q "crossover-26.3.0-wow64.*dxmt 0.80" "$RUNNER_TEMP/list.txt"

@@ -270,12 +270,15 @@ Releases are GitHub Releases with a `manifest.json`
 {"version": "0.2.0", "published": "2026-11-28T12:00:00Z",
  "app": {"file": "MacGaming-0.2.0.zip", "sha256": "…"},
  "mgx": {"file": "mgx-0.2.0-macos-arm64.tar.gz", "sha256": "…"},
- "runtime": [{"kind": "wine", "file": "wine-crossover-26.3.0-wow64.tar.xz", "version": "26.3.0", "sha256": "…"},
+ "runtime": [{"kind": "wine", "file": "wine-crossover-26.3.0-wow64.tar.xz", "version": "crossover-26.3.0-wow64", "sha256": "…"},
              {"kind": "dxmt", "file": "dxmt-0.80.tar.xz", "version": "0.80", "sha256": "…"},
              {"kind": "dxvk", "file": "dxvk-macos-1.10.3-20230507-repack.tar.xz", "version": "1.10.3-20230507-repack", "sha256": "…"}]}
 ```
 
 Each file is fetched from `…/releases/download/v<version>/<file>` (pinned to that release, not `latest`).
+A runtime `version` is spelled the way `mgx runtime install` records it in runtime.json (from the archive
+name), and a component counts as installed when its recorded archive or version matches. Other release
+assets (sources, SHA256SUMS) are not in the manifest and are ignored.
 An optional `"size"` (bytes) per file gives the app a determinate progress bar; without it the app asks
 the server with a HEAD request.
 

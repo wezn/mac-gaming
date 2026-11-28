@@ -71,7 +71,7 @@ cat > "$OUT/manifest.json" <<JSON
   $app_json
   "mgx": {"file": "$mgx_file", "sha256": "$(sha "$OUT/$mgx_file")"},
   "runtime": [
-    {"kind": "wine", "file": "$wine_file", "version": "$WINE_VERSION", "sha256": "$(sha "$OUT/$wine_file")"},
+    {"kind": "wine", "file": "$wine_file", "version": "crossover-$WINE_VERSION-wow64", "sha256": "$(sha "$OUT/$wine_file")"},
     {"kind": "dxmt", "file": "$dxmt_file", "version": "$DXMT_VERSION", "sha256": "$(sha "$OUT/$dxmt_file")"},
     {"kind": "dxvk", "file": "$dxvk_file", "version": "1.10.3-20230507-repack", "sha256": "$(sha "$OUT/$dxvk_file")"}
   ]

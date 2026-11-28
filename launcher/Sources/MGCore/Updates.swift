@@ -13,7 +13,7 @@ import CryptoKit
 //     {"version": "0.2.0", "published": "2026-11-28T12:00:00Z",
 //      "app": {"file": "MacGaming-0.2.0.zip", "sha256": "…"},
 //      "mgx": {"file": "mgx-0.2.0-macos-arm64.tar.gz", "sha256": "…"},
-//      "runtime": [{"kind": "wine", "file": "wine-crossover-26.3.0-wow64.tar.xz", "version": "26.3.0", "sha256": "…"}, …]}
+//      "runtime": [{"kind": "wine", "file": "wine-crossover-26.3.0-wow64.tar.xz", "version": "crossover-26.3.0-wow64", "sha256": "…"}, …]}
 //
 // mgx and the app download it themselves (curl, never a browser), so nothing they fetch is quarantined and
 // an ad-hoc signed build keeps working after an update without another "Open Anyway". Every file is checked
