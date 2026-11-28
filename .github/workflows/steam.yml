@@ -1,0 +1,220 @@
+name: Steam probe
+
+# Installs the real Steam client with mgx (`SteamSetup.exe /S`, as `mgx steam install` does) and the
+# latest Wine / DXMT / DXVK builds, lets it update itself (~300 MB on the first start), starts it again
+# and records what happens: crashes (winedbg in auto mode), steamwebhelper (Steam's Chromium UI)
+# restarts, DXMT's "cross-process swapchain" errors, which processes are still alive, and screenshots.
+# No account or login is involved: the client is expected to reach its login window.
+# A diagnostic, not a gate: a crashing client is reported in the job summary, not as a failure.
+# It depends on Valve's servers, so it only runs by hand or when this file changes.
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - .github/workflows/steam.yml
+      - .github/scripts/steam-probe.sh
+
+permissions:
+  contents: read
+
+concurrency:
+  group: steam-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  probe:
+    name: Steam (${{ matrix.name }})
+    runs-on: macos-15
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      actions: read # download the artifacts of other workflow runs
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # args: steam.exe switches; "-cef-disable-gpu-compositing -cef-in-process-gpu" is what
+          # `mgx steam run` passes (Store.steam.clientArguments). env: extra bottle environment.
+          - { name: dxmt-mgx, backend: dxmt, args: "-cef-disable-gpu-compositing -cef-in-process-gpu" }
+          - { name: wined3d-mgx, backend: wined3d, args: "-cef-disable-gpu-compositing -cef-in-process-gpu" }
+          - { name: dxmt-no-switches, backend: dxmt, args: "" }
+          - { name: wined3d-no-switches, backend: wined3d, args: "" }
+          - { name: dxmt-mgx-writecopy, backend: dxmt, args: "-cef-disable-gpu-compositing -cef-in-process-gpu", env: WINE_SIMULATE_WRITECOPY=1 }
+          - { name: wined3d-mgx-writecopy, backend: wined3d, args: "-cef-disable-gpu-compositing -cef-in-process-gpu", env: WINE_SIMULATE_WRITECOPY=1 }
+          - { name: dxmt-disable-gpu, backend: dxmt, args: "-cef-disable-gpu" }
+          - { name: wined3d-disable-gpu, backend: wined3d, args: "-cef-disable-gpu" }
+          - { name: dxmt-mgx-no-sandbox, backend: dxmt, args: "-cef-disable-gpu-compositing -cef-in-process-gpu -cef-disable-sandbox -no-cef-sandbox" }
+          - { name: dxmt-in-process-gpu, backend: dxmt, args: "-cef-in-process-gpu" }
+          - { name: dxmt-mgx-no-d3d11, backend: dxmt, args: "-cef-disable-gpu-compositing -cef-in-process-gpu -cef-disable-d3d11" }
+          - { name: dxmt-single-process, backend: dxmt, args: "-cef-single-process -cef-disable-gpu-compositing" }
+    defaults:
+      run:
+        shell: bash # -eo pipefail
+    env:
+      BACKEND: ${{ matrix.backend }}
+      VARIANT_ENV: ${{ matrix.env }}
+      VARIANT: ${{ matrix.name }}
+      CLIENT_ARGS: ${{ matrix.args }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up paths
+        run: |
+          {
+            echo "MG_HOME=$RUNNER_TEMP/mg"
+            echo "MGX=$GITHUB_WORKSPACE/launcher/.build/release/mgx"
+            echo "SHOTS=$RUNNER_TEMP/screenshots"
+            echo "PROBE=$RUNNER_TEMP/probe"
+            echo "STEAM_DIR=$RUNNER_TEMP/mg/bottles/st/drive_c/Program Files (x86)/Steam"
+          } >> "$GITHUB_ENV"
+
+      - name: Ensure Rosetta 2
+        run: arch -x86_64 /usr/bin/true || sudo softwareupdate --install-rosetta --agree-to-license
+
+      - name: Cache SwiftPM
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: launcher/.build
+          key: spm-${{ runner.os }}-${{ hashFiles('launcher/Package.resolved') }}
+
+      - name: Build mgx
+        working-directory: launcher
+        run: swift build -c release
+
+      - name: Download the latest Wine, DXMT and DXVK artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          wine_run=$(gh run list --repo "$REPO" --workflow build-wine.yml --status success --limit 1 --json databaseId --jq '.[0].databaseId // empty')
+          gfx_run=$(gh run list --repo "$REPO" --workflow build-graphics.yml --status success --limit 1 --json databaseId --jq '.[0].databaseId // empty')
+          [[ -n "$wine_run" && -n "$gfx_run" ]] || { echo "::error::need a successful Build Wine and Build graphics layers run"; exit 1; }
+          echo "Wine from run $wine_run, DXMT/DXVK from run $gfx_run"
+          gh run download "$wine_run" --repo "$REPO" --pattern 'wine-crossover-*' --dir "$RUNNER_TEMP/wine-artifact"
+          gh run download "$gfx_run" --repo "$REPO" --pattern 'dxmt-*' --pattern 'dxvk-macos-*' --dir "$RUNNER_TEMP/gfx-artifact"
+          echo "WINE_RUN=$wine_run" >> "$GITHUB_ENV"
+
+      - name: Install runtime and create the bottle
+        run: |
+          $MGX runtime install "$RUNNER_TEMP/wine-artifact"
+          $MGX runtime install "$RUNNER_TEMP/gfx-artifact"
+          $MGX bottle create st --backend "$BACKEND"
+          if [[ -n "$VARIANT_ENV" ]]; then $MGX bottle set st --env "$VARIANT_ENV"; fi
+          # Crashes print a backtrace into the log instead of opening the crash dialog.
+          $MGX run --bottle st --backend wined3d reg.exe add 'HKCU\Software\Wine\WineDbg' /v ShowCrashDialog /t REG_DWORD /d 0 /f
+          $MGX doctor || true
+
+      - name: Install Steam
+        run: |
+          mkdir -p "$SHOTS" "$PROBE"
+          # Exactly `mgx steam install`: downloads SteamSetup.exe and runs it with /S (silent) and wined3d.
+          $MGX steam install --bottle st > "$PROBE/install.out" 2>&1 &
+          pid=$!
+          for i in $(seq 1 30); do
+            kill -0 "$pid" 2>/dev/null || break
+            if (( i % 3 == 0 )); then screencapture -x "$SHOTS/install-$((i * 10))s.png" || true; fi
+            sleep 10
+          done
+          if kill -0 "$pid" 2>/dev/null; then
+            screencapture -x "$SHOTS/install-timeout.png" || true
+            echo "::warning::the silent installer was still running after 5 minutes"
+            kill "$pid" 2>/dev/null || true
+          fi
+          code=0; wait "$pid" || code=$?
+          echo "installer exit code: $code"
+          cat "$PROBE/install.out" || true
+          pgrep -fl 'Steam' || true
+          $MGX bottle stop st || true
+          ls -la "$STEAM_DIR" || true
+          installed=false
+          [[ -f "$STEAM_DIR/steam.exe" ]] && installed=true
+          echo "INSTALLED=$installed" >> "$GITHUB_ENV"
+          $installed || { echo "::error::steam.exe was not installed"; exit 1; }
+
+      - name: First start (self-update)
+        run: |
+          # steam.exe downloads and unpacks the client, restarts itself and then starts steamwebhelper.exe
+          # (the Chromium UI). Up to 20 min for that, then 2 min more for the login window.
+          . "$GITHUB_WORKSPACE/.github/scripts/steam-probe.sh"
+          start_steam update
+          webhelper=false
+          for i in $(seq 1 120); do
+            sleep 10
+            sample update
+            if (( i % 3 == 0 )); then screencapture -x "$SHOTS/update-$((i * 10))s.png" || true; fi
+            if pgrep -f 'steamwebhelper.exe' > /dev/null; then webhelper=true; break; fi
+          done
+          echo "UPDATE_WEBHELPER=$webhelper" >> "$GITHUB_ENV"
+          echo "UPDATE_SECONDS=$((i * 10))" >> "$GITHUB_ENV"
+          if $webhelper; then
+            for j in $(seq 1 12); do sleep 10; sample update; screencapture -x "$SHOTS/update-webhelper-$((j * 10))s.png" || true; done
+          else
+            echo "::warning::steamwebhelper.exe did not start within 20 minutes"
+          fi
+          stop_steam update
+          du -sh "$STEAM_DIR" || true
+          ls -la "$STEAM_DIR" || true
+
+      - name: Start Steam
+        run: |
+          # The second start is what users get every time: no download, straight to the login window.
+          . "$GITHUB_WORKSPACE/.github/scripts/steam-probe.sh"
+          start_steam client
+          for i in $(seq 1 36); do
+            sleep 5
+            sample client
+            if (( i % 3 == 0 )); then screencapture -x "$SHOTS/client-$((i * 5))s.png" || true; fi
+          done
+          stop_steam client
+
+      - name: Summary
+        if: always()
+        run: |
+          . "$GITHUB_WORKSPACE/.github/scripts/steam-probe.sh"
+          {
+            echo "## Steam: $VARIANT"
+            echo "- backend: \`$BACKEND\`, extra env: \`${VARIANT_ENV:-none}\`, Wine from Build Wine run $WINE_RUN"
+            echo "- client: \`steam.exe ${CLIENT_ARGS}\`"
+            echo "- installed: ${INSTALLED:-unknown}; first start reached steamwebhelper: ${UPDATE_WEBHELPER:-unknown} after ${UPDATE_SECONDS:-?} s"
+            echo
+            echo "| | first start (update) | second start (180 s) |"
+            echo "|---|---|---|"
+            echo "| crashes (Unhandled exception) | $(crashes update) | $(crashes client) |"
+            echo "| steamwebhelper crashes (in its process) | $(webhelper_crashes update) | $(webhelper_crashes client) |"
+            echo "| steamwebhelper main processes started | $(webhelper_starts update) | $(webhelper_starts client) |"
+            echo "| \"cross-process swapchain\" (DXMT) | $(swapchain update) | $(swapchain client) |"
+            echo "| steam.exe / steamwebhelper processes alive at the end | $(alive update) | $(alive client) |"
+            for stage in client update; do
+              f=$(logpath "$stage")
+              [[ -f "$f" ]] || continue
+              if grep -q 'Unhandled exception' "$f"; then
+                echo
+                echo "First crash in the $stage log (\`$(basename "$f")\`):"
+                echo '```'
+                grep -m1 -A40 'Unhandled exception' "$f" | grep -v '^\s*VK_\|mvk-info' | head -n 45
+                echo '```'
+                break
+              fi
+            done
+            echo
+            echo "steamwebhelper lines in Steam's logs:"
+            echo '```'
+            grep -rih 'webhelper' "$STEAM_DIR/logs" 2>/dev/null | grep -iv 'cef_log' | tail -n 25 || true
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+          mkdir -p "$PROBE/steam-logs"
+          cp -R "$STEAM_DIR/logs/." "$PROBE/steam-logs/" 2>/dev/null || true
+
+      - name: Upload logs and screenshots
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: steam-${{ matrix.name }}
+          path: |
+            ${{ runner.temp }}/mg/logs
+            ${{ runner.temp }}/screenshots
+            ${{ runner.temp }}/probe
+          if-no-files-found: ignore
