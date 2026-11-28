@@ -73,8 +73,7 @@ final class RuntimeDownloadModel: ObservableObject {
     func install(model: AppModel) {
         guard case .available(let m, _) = phase else { return }
         let p = model.paths
-        var sizes: [String: Int64] = [:]
-        for a in m.runtime { if let s = a.size { sizes[a.file] = s } }
+        let sizes = Dictionary(m.runtime.compactMap { a in a.size.map { (a.file, $0) } }, uniquingKeysWith: { x, _ in x })
         phase = .downloading("Starting…")
         progress = nil
         let job = model.start("Download runtime (release \(m.version))") { r in
