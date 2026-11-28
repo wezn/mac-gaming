@@ -37,10 +37,7 @@ jobs:
         include:
           # args: steam.exe switches; "-cef-disable-gpu-compositing -cef-in-process-gpu" is what
           # `mgx steam run` passes (Store.steam.clientArguments). env: extra bottle environment.
-          - { name: dxmt-mgx, backend: dxmt, args: "-cef-disable-gpu-compositing -cef-in-process-gpu", env: "" }
           - { name: wined3d-mgx, backend: wined3d, args: "-cef-disable-gpu-compositing -cef-in-process-gpu", env: "" }
-          - { name: dxmt-no-switches, backend: dxmt, args: "", env: "" }
-          - { name: wined3d-no-switches, backend: wined3d, args: "", env: "" }
     defaults:
       run:
         shell: bash # -eo pipefail
@@ -153,6 +150,25 @@ jobs:
           stop_steam update
           du -sh "$STEAM_DIR" || true
           ls -la "$STEAM_DIR" || true
+
+      - name: Steam's CEF switches (diagnostic)
+        run: |
+          # Which -cef-* switches the client knows, and which Chromium switches it passes on.
+          python3 - "$STEAM_DIR" <<'PY'
+          import os, re, sys, collections
+          found = collections.defaultdict(set)
+          pats = [re.compile(rb'-cef-[a-z0-9-]{3,60}'), re.compile(rb'--?(?:in-process-gpu|single-process|use-angle|use-gl|disable-features|enable-features)[a-z0-9=,-]{0,60}')]
+          for root, _, files in os.walk(sys.argv[1]):
+              for f in files:
+                  if not f.lower().endswith(('.exe', '.dll')): continue
+                  p = os.path.join(root, f)
+                  try: data = open(p, 'rb').read()
+                  except OSError: continue
+                  for d in (data, data.replace(b'\x00', b'')):
+                      for pat in pats:
+                          for m in pat.findall(d): found[m.decode('ascii', 'replace')].add(os.path.relpath(p, sys.argv[1]))
+          for k in sorted(found): print(k, '\t', ', '.join(sorted(found[k]))[:200])
+          PY
 
       - name: Start Steam
         run: |
