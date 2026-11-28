@@ -14,6 +14,7 @@ on:
     paths:
       - .github/workflows/steam.yml
       - .github/scripts/steam-probe.sh
+      - .github/scripts/windows.swift
 
 permissions:
   contents: read
@@ -36,18 +37,10 @@ jobs:
         include:
           # args: steam.exe switches; "-cef-disable-gpu-compositing -cef-in-process-gpu" is what
           # `mgx steam run` passes (Store.steam.clientArguments). env: extra bottle environment.
-          - { name: dxmt-mgx, backend: dxmt, args: "-cef-disable-gpu-compositing -cef-in-process-gpu" }
-          - { name: wined3d-mgx, backend: wined3d, args: "-cef-disable-gpu-compositing -cef-in-process-gpu" }
-          - { name: dxmt-no-switches, backend: dxmt, args: "" }
-          - { name: wined3d-no-switches, backend: wined3d, args: "" }
-          - { name: dxmt-mgx-writecopy, backend: dxmt, args: "-cef-disable-gpu-compositing -cef-in-process-gpu", env: WINE_SIMULATE_WRITECOPY=1 }
-          - { name: wined3d-mgx-writecopy, backend: wined3d, args: "-cef-disable-gpu-compositing -cef-in-process-gpu", env: WINE_SIMULATE_WRITECOPY=1 }
-          - { name: dxmt-disable-gpu, backend: dxmt, args: "-cef-disable-gpu" }
-          - { name: wined3d-disable-gpu, backend: wined3d, args: "-cef-disable-gpu" }
-          - { name: dxmt-mgx-no-sandbox, backend: dxmt, args: "-cef-disable-gpu-compositing -cef-in-process-gpu -cef-disable-sandbox -no-cef-sandbox" }
-          - { name: dxmt-in-process-gpu, backend: dxmt, args: "-cef-in-process-gpu" }
-          - { name: dxmt-mgx-no-d3d11, backend: dxmt, args: "-cef-disable-gpu-compositing -cef-in-process-gpu -cef-disable-d3d11" }
-          - { name: dxmt-single-process, backend: dxmt, args: "-cef-single-process -cef-disable-gpu-compositing" }
+          - { name: dxmt-mgx, backend: dxmt, args: "-cef-disable-gpu-compositing -cef-in-process-gpu", env: "" }
+          - { name: wined3d-mgx, backend: wined3d, args: "-cef-disable-gpu-compositing -cef-in-process-gpu", env: "" }
+          - { name: dxmt-no-switches, backend: dxmt, args: "", env: "" }
+          - { name: wined3d-no-switches, backend: wined3d, args: "", env: "" }
     defaults:
       run:
         shell: bash # -eo pipefail
@@ -68,6 +61,7 @@ jobs:
             echo "MGX=$GITHUB_WORKSPACE/launcher/.build/release/mgx"
             echo "SHOTS=$RUNNER_TEMP/screenshots"
             echo "PROBE=$RUNNER_TEMP/probe"
+            echo "WINLIST=$RUNNER_TEMP/windows"
             echo "STEAM_DIR=$RUNNER_TEMP/mg/bottles/st/drive_c/Program Files (x86)/Steam"
           } >> "$GITHUB_ENV"
 
@@ -82,7 +76,9 @@ jobs:
 
       - name: Build mgx
         working-directory: launcher
-        run: swift build -c release
+        run: |
+          swift build -c release
+          swiftc -O ../.github/scripts/windows.swift -o "$WINLIST"
 
       - name: Download the latest Wine, DXMT and DXVK artifacts
         env:
@@ -144,13 +140,13 @@ jobs:
           for i in $(seq 1 120); do
             sleep 10
             sample update
-            if (( i % 3 == 0 )); then screencapture -x "$SHOTS/update-$((i * 10))s.png" || true; fi
+            if (( i % 3 == 0 )); then shot update "update-$((i * 10))s"; fi
             if pgrep -f 'steamwebhelper.exe' > /dev/null; then webhelper=true; break; fi
           done
           echo "UPDATE_WEBHELPER=$webhelper" >> "$GITHUB_ENV"
           echo "UPDATE_SECONDS=$((i * 10))" >> "$GITHUB_ENV"
           if $webhelper; then
-            for j in $(seq 1 12); do sleep 10; sample update; screencapture -x "$SHOTS/update-webhelper-$((j * 10))s.png" || true; done
+            for j in $(seq 1 12); do sleep 10; sample update; shot update "update-webhelper-$((j * 10))s"; done
           else
             echo "::warning::steamwebhelper.exe did not start within 20 minutes"
           fi
@@ -166,7 +162,7 @@ jobs:
           for i in $(seq 1 36); do
             sleep 5
             sample client
-            if (( i % 3 == 0 )); then screencapture -x "$SHOTS/client-$((i * 5))s.png" || true; fi
+            if (( i % 3 == 0 )); then shot client "client-$((i * 5))s"; fi
           done
           stop_steam client
 

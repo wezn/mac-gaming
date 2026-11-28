@@ -3,8 +3,17 @@
 # ("update" for the first start, "client" for the second) and keeps its files in $PROBE.
 # The steps run with bash -eo pipefail, so a pipeline that may find nothing ends in `|| true`.
 
-# Wine processes, as ps shows them: "<pid> C:\...\program.exe args".
-wine_ps() { { pgrep -fl . || true; } | { grep -E '^[0-9]+ [A-Za-z]:[\\/]' || true; } | cut -c1-400; }
+# Wine processes, as ps shows them: "<pid> C:\...\program.exe args", or the Unix path inside the
+# bottle for a program mgx started directly.
+wine_ps() { { pgrep -fl . || true; } | { grep -E '^[0-9]+ ([A-Za-z]:[\\/]|[^ ]*/drive_c/)' || true; } | cut -c1-400; }
+
+# A screenshot plus the list of Wine windows (position, size, alpha), since an off-screen or
+# transparent window is invisible in the screenshot.
+shot() {
+  local stage=$1 name=$2
+  screencapture -x "$SHOTS/$name.png" || true
+  { echo "== $name $(date +%T)"; "$WINLIST" || true; } >> "$PROBE/$stage-windows.txt"
+}
 
 # Starts steam.exe with $CLIENT_ARGS and crash tracing, in the background, and finds its mgx log.
 start_steam() {
