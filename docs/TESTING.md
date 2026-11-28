@@ -135,7 +135,8 @@ folder merged into `lib/`.
 ### 6. Battle.net install
 
 `mgx battlenet install --bottle ow --backend d3dmetal`. mgx downloads Blizzard's installer and runs it with
-wined3d. It is interactive: click through, sign in if asked, quit the client if it starts.
+wined3d. It is interactive: click through, sign in if asked, quit the client if it starts (the
+installer starts it without mgx's Chromium switches, so it may freeze; step 7 starts it properly).
 
 **Success:** `C:\Program Files (x86)\Battle.net\Battle.net Launcher.exe` exists in the bottle (step 7
 fails with "not installed" otherwise). **Report:** an installer that hangs on a white or black window
@@ -153,8 +154,9 @@ stutter, crashes (the newest `Overwatch`/`Battle.net` logs are in the report).
 
 ### 8. Overwatch 2 on DXMT
 
-Same bottle, `mgx bottle set ow --backend dxmt`. Note that the Battle.net client's own Chromium UI now
-also runs on DXMT; if the client is blank, that alone is worth reporting.
+Same bottle, `mgx bottle set ow --backend dxmt`. The Battle.net client's own Chromium UI now also runs on
+DXMT; `mgx battlenet run` passes `--in-process-gpu --disable-gpu-compositing` so it can (without them
+the window freezes). If the client is blank anyway, that alone is worth reporting.
 
 **Success / report:** as step 7. The interesting result is the comparison: fps, stutter while shaders
 compile, visual glitches.

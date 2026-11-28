@@ -38,8 +38,17 @@ public enum Store: String, CaseIterable, Sendable {
         self == .battlenet ? ["WINE_SIMULATE_WRITECOPY": "1"] : [:]
     }
 
-    /// Steam's Chromium UI needs these under Wine on macOS.
-    public var clientArguments: [String] { self == .steam ? ["-cef-disable-gpu-compositing", "-cef-in-process-gpu"] : [] }
+    /// Chromium switches for the client's built-in browser under Wine on macOS (Steam spells them with `-cef-`).
+    /// Battle.net: Battle.net Launcher.exe passes them on to Battle.net.exe. Without --in-process-gpu, DXMT
+    /// cannot present from Chromium's GPU process ("cross-process swapchain not supported yet") and the
+    /// window freezes; with it alone the window stays black; with --disable-gpu-compositing as well the login
+    /// window renders on DXMT and wined3d. Verified by the Battle.net probe workflow.
+    public var clientArguments: [String] {
+        switch self {
+        case .steam: return ["-cef-disable-gpu-compositing", "-cef-in-process-gpu"]
+        case .battlenet: return ["--in-process-gpu", "--disable-gpu-compositing"]
+        }
+    }
 }
 
 public enum Downloader {

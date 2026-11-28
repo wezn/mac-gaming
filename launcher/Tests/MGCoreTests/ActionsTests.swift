@@ -127,7 +127,7 @@ final class ActionsTests: XCTestCase {
         let p = try l.planStoreClient(.battlenet, bottle: "bn", arguments: ["--x"])
         XCTAssertEqual(p.choice.backend, .dxvk)
         XCTAssertEqual(p.choice.reason, "bottle default")
-        XCTAssertEqual(p.arguments.last, "--x")
+        XCTAssertEqual(Array(p.arguments.suffix(3)), ["--in-process-gpu", "--disable-gpu-compositing", "--x"])
         XCTAssertEqual(p.programName, "Battle.net Launcher.exe")
         XCTAssertEqual(p.environment["WINE_SIMULATE_WRITECOPY"], "1", "added to bottles that predate it")
         XCTAssertEqual(try l.bottles.get("bn").config.env["WINE_SIMULATE_WRITECOPY"], "1", "saved, so games get it too")

@@ -31,17 +31,23 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { name: wined3d, backend: wined3d, env: "" }
-          - { name: dxmt, backend: dxmt, env: "" }
-          - { name: wined3d-writecopy, backend: wined3d, env: WINE_SIMULATE_WRITECOPY=1 }
-          - { name: dxmt-writecopy, backend: dxmt, env: WINE_SIMULATE_WRITECOPY=1 }
+          # All with WINE_SIMULATE_WRITECOPY=1 (what `mgx battlenet` saves; libcef crashes without it).
+          # args: Chromium switches (Battle.net Launcher.exe passes them on to Battle.net.exe); "mgx" is
+          # what `mgx battlenet run` passes (Store.battlenet.clientArguments). Earlier runs: with no
+          # switches DXMT logs "cross-process swapchain not supported yet" and the window freezes,
+          # --in-process-gpu alone leaves it black, --disable-gpu leaves it white on both backends, and
+          # Client.HardwareAcceleration=false in Battle.net.config changes nothing.
+          - { name: dxmt, backend: dxmt, args: "--in-process-gpu --disable-gpu-compositing" }
+          - { name: wined3d, backend: wined3d, args: "--in-process-gpu --disable-gpu-compositing" }
+          - { name: dxmt-no-switches, backend: dxmt, args: "" }
     defaults:
       run:
         shell: bash # -eo pipefail
     env:
       BACKEND: ${{ matrix.backend }}
-      VARIANT_ENV: ${{ matrix.env }}
+      VARIANT_ENV: WINE_SIMULATE_WRITECOPY=1
       VARIANT: ${{ matrix.name }}
+      CLIENT_ARGS: ${{ matrix.args }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -130,8 +136,8 @@ jobs:
         run: |
           # The same program `mgx battlenet run` starts, with crash tracing.
           exe="$BN_DIR/Battle.net Launcher.exe"
-          [[ -f "$exe" ]] || exe="$BN_DIR/Battle.net.exe"
-          $MGX run --bottle bn --debug 'err+all,+seh,+loaddll' "$exe" > "$RUNNER_TEMP/client.out" 2>&1 &
+          # shellcheck disable=SC2086 # CLIENT_ARGS is a word list
+          $MGX run --bottle bn --debug 'err+all,+seh,+loaddll' "$exe" $CLIENT_ARGS > "$RUNNER_TEMP/client.out" 2>&1 &
           pid=$!
           for i in $(seq 1 12); do sleep 10; screencapture -x "$SHOTS/client-$((i * 10))s.png" || true; done
           pgrep -fl 'Battle.net' | tee "$RUNNER_TEMP/alive.txt" || true
@@ -151,6 +157,8 @@ jobs:
           {
             echo "## Battle.net: $VARIANT"
             echo "- backend: \`$BACKEND\`, extra env: \`${VARIANT_ENV:-none}\`, Wine from Build Wine run $WINE_RUN"
+            echo "- client: \`Battle.net Launcher.exe ${CLIENT_ARGS}\`"
+            echo "- \"cross-process swapchain not supported\" (DXMT): $(grep -c 'cross-process swapchain' "$client_log" 2>/dev/null || true) after start, $(grep -c 'cross-process swapchain' "$install_log" 2>/dev/null || true) during install"
             echo "- installed: ${INSTALLED:-unknown}"
             echo "- crashes during install (incl. the client it starts): $(count "$install_log")"
             echo "- crashes after starting the client: $(count "$client_log")"
