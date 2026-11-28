@@ -6,6 +6,9 @@ successful **Build Wine** and **Build graphics layers** runs (they are not rebui
 and publishes everything with checksums and a manifest. Users install it as described in
 [INSTALL.md](INSTALL.md).
 
+A pull request that changes the workflow, `scripts/release-manifest.py`, `THIRD_PARTY_NOTICES.md` or
+`launcher/Scripts/make_app.sh` runs the build and collect jobs as a dry run (nothing is published).
+
 The app is **ad-hoc signed and not notarized** (no Apple Developer ID yet): users approve it once with
 **Open Anyway**. The workflow checks that the signature is ad hoc and valid (`codesign --verify --strict`).
 

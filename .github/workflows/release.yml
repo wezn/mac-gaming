@@ -6,6 +6,8 @@ name: Release
 #   (launcher/Sources/MGCore/Paths.swift, also `mgx --version`) and the tagged commit must be on main.
 # - Running it by hand (workflow_dispatch) creates a DRAFT release, to check a release before
 #   tagging it. Delete the draft afterwards (docs/RELEASING.md).
+# - A pull request that changes the release files runs the build and collect jobs as a dry run
+#   (version = MGVersion.string); nothing is published. Never pull_request_target: this runs PR code.
 #
 # Asset names are a contract (the in-app updater reads
 # https://github.com/wezn/mac-gaming/releases/latest/download/manifest.json):
@@ -16,6 +18,12 @@ name: Release
 on:
   push:
     tags: ["v*"]
+  pull_request:
+    paths:
+      - .github/workflows/release.yml
+      - scripts/release-manifest.py
+      - THIRD_PARTY_NOTICES.md
+      - launcher/Scripts/make_app.sh
   workflow_dispatch:
     inputs:
       version:
@@ -34,10 +42,10 @@ on:
 permissions:
   contents: read
 
-# One release at a time; never cancel one halfway.
+# One release at a time; never cancel one halfway. (Pull request dry runs have their own group.)
 concurrency:
-  group: release
-  cancel-in-progress: false
+  group: ${{ github.event_name == 'pull_request' && format('release-dry-run-{0}', github.ref) || 'release' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 defaults:
   run:
@@ -64,9 +72,13 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
         run: |
-          if [[ "$EVENT" == push ]]; then v="${REF_NAME#v}"; else v="${INPUT_VERSION#v}"; fi
-          [[ "$v" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]] || { echo "::error::not a version: '$v'"; exit 1; }
           code=$(sed -n 's/.*static let string = "\(.*\)".*/\1/p' launcher/Sources/MGCore/Paths.swift)
+          case "$EVENT" in
+            push) v="${REF_NAME#v}" ;;
+            workflow_dispatch) v="${INPUT_VERSION#v}" ;;
+            *) v="$code" ;; # pull_request dry run
+          esac
+          [[ "$v" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]] || { echo "::error::not a version: '$v'"; exit 1; }
           if [[ "$v" != "$code" ]]; then
             echo "::error::release version $v does not match MGVersion.string \"$code\" (launcher/Sources/MGCore/Paths.swift). Bump the constant on main first, then tag."
             exit 1
@@ -329,6 +341,7 @@ jobs:
   publish:
     name: Publish the release
     needs: [app, runtime]
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
