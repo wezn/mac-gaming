@@ -68,8 +68,11 @@ jobs:
           [[ "$archs" == *arm64* ]] || { echo "::error::mgx is not arm64 ($archs)"; exit 1; }
           codesign -dv "$bin" 2>&1 | grep -E '^(Identifier|Signature|CodeDirectory)' || true
           out="$RUNNER_TEMP/mgx-dist"
-          mkdir -p "$out"
-          tar -czf "$out/mgx-macos-arm64.tar.gz" -C .build/release mgx
+          stage="$RUNNER_TEMP/mgx-stage"
+          mkdir -p "$out" "$stage"
+          cp "$bin" ../THIRD_PARTY_NOTICES.md "$stage/"
+          "$stage/mgx" licenses | cmp - ../THIRD_PARTY_NOTICES.md || { echo "::error::mgx licenses does not print THIRD_PARTY_NOTICES.md"; exit 1; }
+          tar -czf "$out/mgx-macos-arm64.tar.gz" -C "$stage" mgx THIRD_PARTY_NOTICES.md
           (cd "$out" && shasum -a 256 mgx-macos-arm64.tar.gz | tee mgx-macos-arm64.tar.gz.sha256)
           echo "dir=$out" >> "$GITHUB_OUTPUT"
 
@@ -113,6 +116,7 @@ jobs:
           codesign -dv "$app" 2>&1
           file "$app/Contents/MacOS/MacGaming"
           test -x "$app/Contents/MacOS/MacGaming"
+          cmp "$app/Contents/Resources/THIRD_PARTY_NOTICES.md" ../THIRD_PARTY_NOTICES.md
 
       - name: Seed a demo mgx root
         run: |

@@ -60,7 +60,10 @@ pick carefully.
 | Wine / CrossOver source | LGPL-2.1+ | Yes. You must publish the source of any changes you make to Wine (CodeWeavers does this) |
 | DXMT (v0.80, `dxmt-*.tar.xz`) | MIT (checked at v0.80; LICENSE ships in the artifact) | Yes, with attribution |
 | LLVM 15 (statically linked into DXMT's `winemetal.so`) | Apache-2.0 with LLVM exception | Yes. The LLVM exception waives attribution for compiled binaries; crediting it anyway is good form |
-| mingw-w64 runtime (statically linked into DXMT/DXVK DLLs: libstdc++, libgcc, winpthreads) | GPL-3.0 + GCC Runtime Library Exception; winpthreads MIT/BSD-style | Yes. The exception permits proprietary distribution; keep winpthreads' notice |
+| GCC runtime and mingw-w64 runtime (statically linked into DXVK's DLLs: libstdc++, libgcc, winpthreads; DXMT's DLLs use llvm-mingw's libc++/libunwind instead) | GPL-3.0 + GCC Runtime Library Exception; libc++ Apache-2.0 with LLVM exception; mingw-w64 runtime ZPL-2.1 and others; winpthreads MIT/BSD-style | Yes. The exception permits proprietary distribution; keep the mingw-w64 and winpthreads notices |
+| FreeType, GnuTLS (in the Wine runtime's `lib/`) | FTL (chosen over GPL-2.0); LGPL-2.1+ | Yes, with the FreeType credit; GnuTLS ships as a replaceable dylib |
+| GMP, Nettle (GnuTLS dependencies, in `lib/`) | LGPL-3.0+ (chosen over GPL-2.0+) | Yes, as replaceable dylibs with source offered |
+| Libraries Wine bundles (libpng, libjpeg, zlib, FAudio, vkd3d, OpenLDAP, ...) | permissive or LGPL-2.1+ | Yes, with their notices |
 | DXVK-macOS (Gcenx fork, v1.10.3-20230507-repack, `dxvk-macos-*.tar.xz`) | zlib (LICENSE ships in the artifact) | Yes |
 | MoltenVK | Apache-2.0 | Yes, with attribution |
 | D3DMetal (Apple GPTK) | Apple license, **non-commercial redistribution only** | **No, not without an agreement with Apple.** Options: ask Apple for a commercial license, or have users install GPTK themselves and point the app at it |
@@ -69,7 +72,12 @@ That makes D3DMetal the main business risk. It is the only mature DirectX 12 pat
 the default backend for Overwatch 2. To own a sellable fast path, invest in DXMT
 (contribute upstream, or sponsor it).
 
-The app also needs an Apple Developer ID ($99/yr) and notarization. It cannot use
+Full notices for everything shipped (including the libraries bundled in the Wine runtime):
+[THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md). Releases attach the CrossOver and Nettle source
+tarballs for the LGPL parts ([RELEASING.md](RELEASING.md)).
+
+For now the app is sold ad-hoc signed (users approve it once with Open Anyway, see
+[INSTALL.md](INSTALL.md)). Later it needs an Apple Developer ID ($99/yr) and notarization. It cannot use
 "Wine" or "CrossOver" in its name (trademarks).
 
 ## Target games

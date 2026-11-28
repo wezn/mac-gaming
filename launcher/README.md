@@ -21,6 +21,9 @@ swift test
 
 macOS 13+ is required at run time. macOS 15+ is recommended: Rosetta 2 translates AVX/AVX2 only from macOS 15.
 
+**Releases:** [GitHub Releases](https://github.com/wezn/mac-gaming/releases/latest) carry `mgx-<version>-macos-arm64.tar.gz`
+(`mgx` plus `THIRD_PARTY_NOTICES.md`), the app and the runtimes; see [docs/INSTALL.md](../docs/INSTALL.md).
+
 **Prebuilt:** every Launcher workflow run uploads an arm64 release build as the `mgx-macos-arm64` artifact
 (`mgx-macos-arm64.tar.gz` plus its SHA-256). It is unsigned: `gh run download` leaves it runnable, but a copy
 downloaded with a browser is quarantined and needs `xattr -d com.apple.quarantine mgx` first.
@@ -58,6 +61,7 @@ What it does (v1):
   when DXMT was built against a different Wine; the run plan names the Wine tree it will use.
 - **Doctor**: the `mgx doctor` checks. **Copy Diagnostics** puts a redacted `mgx report` (without
   logs) on the clipboard; **Save Report…** writes the full `.tar.gz`. **Logs**: every run log, with a live tail.
+- **Acknowledgements** (Mac Gaming menu): the third-party notices bundled in `Contents/Resources`.
 - **Activity**: each background job (wineboot, an install, a running program) with mgx's progress
   lines and its Wine log, tailing live. Settings (⌘,): GPTK path, default runtime and bottle.
 
@@ -114,6 +118,7 @@ mgx run ~/Games/SomeGame/Game.exe -windowed
 | `mgx config [show]` / `set <key> <value>` / `unset <key>` | Keys: `gptk`, `default-runtime`, `default-bottle` |
 | `mgx doctor` | Check macOS version, Apple Silicon, Rosetta, runtimes, MoltenVK, DXMT, DXVK, the GPTK path (and its version), the D3DMetal overlay and bottles. Exits 1 on errors. `--json` for machine-readable output |
 | `mgx report` | Bundle host facts, doctor (text and JSON), settings, runtime manifests, the DXMT and D3DMetal overlay state, bottle settings and the newest logs into `mgx-report-<time>.tar.gz` for a bug report. `$HOME` becomes `~`, your account name `USER`. `-o PATH` (a directory unless it ends in `.tar.gz`), `--logs N`, `--log-kib N` |
+| `mgx licenses` | Print `THIRD_PARTY_NOTICES.md` (the licenses of everything mgx, the app and the runtimes ship), which sits next to `mgx` in the release tarball. `--path` prints where it is |
 | `mgx logs` | List per-run logs. `--last` prints the newest, `--path` prints paths only, `--bottle B`, `-n N` |
 
 ### `mgx run`

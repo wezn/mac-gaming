@@ -1,0 +1,425 @@
+name: Release
+
+# Publishes a GitHub Release with the app, mgx and the runtimes. See docs/RELEASING.md.
+#
+# - Pushing a tag v<version> publishes the release. <version> must equal MGVersion.string
+#   (launcher/Sources/MGCore/Paths.swift, also `mgx --version`) and the tagged commit must be on main.
+# - Running it by hand (workflow_dispatch) creates a DRAFT release, to check a release before
+#   tagging it. Delete the draft afterwards (docs/RELEASING.md).
+#
+# Asset names are a contract (the in-app updater reads
+# https://github.com/wezn/mac-gaming/releases/latest/download/manifest.json):
+#   MacGaming-<version>.zip, mgx-<version>-macos-arm64.tar.gz, wine-crossover-<cx>-wow64.tar.xz,
+#   dxmt-<v>.tar.xz, dxvk-macos-<v>.tar.xz, SHA256SUMS, manifest.json
+# plus the corresponding source of the LGPL parts (crossover-sources-<cx>.tar.gz, nettle-<v>.tar.gz).
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version, equal to MGVersion.string (e.g. 0.1.0). Creates a DRAFT release v<version>."
+        required: true
+      wine_run_id:
+        description: "Build Wine run to take the Wine runtime from (default: the newest successful one)"
+        required: false
+        default: ""
+      graphics_run_id:
+        description: "Build graphics layers run to take DXMT and DXVK from (default: the newest successful one)"
+        required: false
+        default: ""
+
+# Least privilege: only the publish job can write (it creates the release).
+permissions:
+  contents: read
+
+# One release at a time; never cancel one halfway.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash # -eo pipefail
+
+jobs:
+  app:
+    name: Build MacGaming.app and mgx
+    runs-on: macos-15
+    timeout-minutes: 45
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Resolve and check the version
+        id: version
+        env:
+          EVENT: ${{ github.event_name }}
+          REF_NAME: ${{ github.ref_name }}
+          INPUT_VERSION: ${{ inputs.version }}
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          if [[ "$EVENT" == push ]]; then v="${REF_NAME#v}"; else v="${INPUT_VERSION#v}"; fi
+          [[ "$v" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]] || { echo "::error::not a version: '$v'"; exit 1; }
+          code=$(sed -n 's/.*static let string = "\(.*\)".*/\1/p' launcher/Sources/MGCore/Paths.swift)
+          if [[ "$v" != "$code" ]]; then
+            echo "::error::release version $v does not match MGVersion.string \"$code\" (launcher/Sources/MGCore/Paths.swift). Bump the constant on main first, then tag."
+            exit 1
+          fi
+          if [[ "$EVENT" == push ]]; then
+            # A published release must come from main. ("behind"/"identical": the commit is in main.)
+            status=$(gh api "repos/$REPO/compare/main...$GITHUB_SHA" --jq .status)
+            [[ "$status" == behind || "$status" == identical ]] || { echo "::error::tag $REF_NAME points at $GITHUB_SHA, which is not on main ($status)"; exit 1; }
+          fi
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+          echo "Release $v from $GITHUB_SHA ($EVENT)"
+
+      - name: Toolchain
+        run: swift --version
+
+      - name: Test
+        working-directory: launcher
+        run: swift test --parallel
+
+      - name: Build mgx and MacGaming.app
+        working-directory: launcher
+        run: |
+          swift build -c release --product mgx
+          BUILD_NUMBER="$GITHUB_RUN_NUMBER" Scripts/make_app.sh
+
+      - name: Check the build
+        working-directory: launcher
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          app=build/MacGaming.app
+          fail() { echo "::error::$*"; exit 1; }
+          [[ "$(.build/release/mgx --version)" == "$VERSION" ]] || fail "mgx --version is not $VERSION"
+          for bin in .build/release/mgx "$app/Contents/MacOS/MacGaming"; do
+            [[ "$(lipo -archs "$bin")" == *arm64* ]] || fail "$bin is not arm64"
+          done
+          [[ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app/Contents/Info.plist")" == "$VERSION" ]] \
+            || fail "CFBundleShortVersionString is not $VERSION"
+          cmp "$app/Contents/Resources/THIRD_PARTY_NOTICES.md" ../THIRD_PARTY_NOTICES.md || fail "the app does not carry THIRD_PARTY_NOTICES.md"
+          # Sold ad-hoc signed for now (users approve it once with Open Anyway): no Developer ID, no notarization.
+          codesign --verify --strict --verbose=2 "$app"
+          codesign -dv "$app" 2>&1 | tee "$RUNNER_TEMP/codesign.txt"
+          grep -q '^Signature=adhoc' "$RUNNER_TEMP/codesign.txt" || fail "MacGaming.app is not ad-hoc signed"
+
+      - name: Package
+        id: package
+        working-directory: launcher
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          out="$RUNNER_TEMP/dist"
+          stage="$RUNNER_TEMP/mgx-stage"
+          mkdir -p "$out" "$stage"
+          ditto -c -k --keepParent build/MacGaming.app "$out/MacGaming-$VERSION.zip"
+          cp .build/release/mgx "$stage/"
+          cp ../THIRD_PARTY_NOTICES.md "$stage/"
+          tar -czf "$out/mgx-$VERSION-macos-arm64.tar.gz" -C "$stage" mgx THIRD_PARTY_NOTICES.md
+          ls -l "$out"
+          echo "dir=$out" >> "$GITHUB_OUTPUT"
+
+      - name: Check the packages as a user gets them
+        env:
+          DIST: ${{ steps.package.outputs.dir }}
+          V: ${{ steps.version.outputs.version }}
+        run: |
+          fail() { echo "::error::$*"; exit 1; }
+          chk="$RUNNER_TEMP/dist-check"
+          mkdir -p "$chk/app" "$chk/mgx"
+          ditto -x -k "$DIST/MacGaming-$V.zip" "$chk/app"
+          names() { find "$1" -mindepth 1 -maxdepth 1 -exec basename {} \; | LC_ALL=C sort | tr '\n' ' '; }
+          [[ "$(names "$chk/app")" == "MacGaming.app " ]] || fail "the zip's top level is not MacGaming.app: $(names "$chk/app")"
+          codesign --verify --strict --verbose=2 "$chk/app/MacGaming.app"
+          tar -xzf "$DIST/mgx-$V-macos-arm64.tar.gz" -C "$chk/mgx"
+          [[ "$(names "$chk/mgx")" == "THIRD_PARTY_NOTICES.md mgx " ]] || fail "unexpected mgx tarball contents: $(names "$chk/mgx")"
+          [[ "$("$chk/mgx/mgx" --version)" == "$V" ]] || fail "the packaged mgx is not $V"
+          "$chk/mgx/mgx" licenses | cmp - THIRD_PARTY_NOTICES.md || fail "mgx licenses does not print THIRD_PARTY_NOTICES.md"
+          codesign --verify --verbose=2 "$chk/mgx/mgx"
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-app
+          path: ${{ steps.package.outputs.dir }}
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
+
+  runtime:
+    # The runtimes are not rebuilt here (Wine takes hours): this takes them from the newest
+    # successful Build Wine / Build graphics layers runs, checks they belong together, and fetches
+    # the corresponding source of their LGPL parts.
+    name: Collect the runtimes
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      actions: read # download the artifacts of other workflow runs
+    outputs:
+      wine_run: ${{ steps.runs.outputs.wine_run }}
+      graphics_run: ${{ steps.runs.outputs.graphics_run }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Pick the runs
+        id: runs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          WINE_RUN: ${{ inputs.wine_run_id }}
+          GRAPHICS_RUN: ${{ inputs.graphics_run_id }}
+        run: |
+          # Prints the newest successful run of workflow $1 that still has (unexpired) artifacts
+          # matching every regex in $2...
+          pick() {
+            local wf=$1; shift
+            local id names re ok
+            for id in $(gh run list --repo "$REPO" --workflow "$wf" --status success --limit 30 --json databaseId --jq '.[].databaseId'); do
+              names=$(gh api "repos/$REPO/actions/runs/$id/artifacts?per_page=100" --jq '.artifacts[] | select(.expired | not) | .name')
+              ok=1
+              for re in "$@"; do grep -Eq "$re" <<<"$names" || ok=0; done
+              if (( ok )); then echo "$id"; return 0; fi
+            done
+            return 1
+          }
+          for v in "$WINE_RUN" "$GRAPHICS_RUN"; do
+            [[ -z "$v" || "$v" =~ ^[0-9]+$ ]] || { echo "::error::run ids are numbers, got '$v'"; exit 1; }
+          done
+          wine=${WINE_RUN:-$(pick build-wine.yml '^wine-crossover-[0-9.]+-wow64$')} \
+            || { echo "::error::no successful Build Wine run with an unexpired Wine artifact"; exit 1; }
+          gfx=${GRAPHICS_RUN:-$(pick build-graphics.yml '^dxmt-' '^dxvk-macos-')} \
+            || { echo "::error::no successful Build graphics layers run with unexpired DXMT and DXVK artifacts"; exit 1; }
+          for id in "$wine" "$gfx"; do
+            gh run view "$id" --repo "$REPO" --json workflowName,headBranch,headSha,conclusion,url \
+              --jq '"\(.workflowName): \(.url) (\(.headBranch) @ \(.headSha), \(.conclusion))"'
+            [[ "$(gh run view "$id" --repo "$REPO" --json conclusion --jq .conclusion)" == success ]] \
+              || { echo "::error::run $id did not succeed"; exit 1; }
+          done
+          [[ "$(gh run view "$wine" --repo "$REPO" --json workflowName --jq .workflowName)" == "Build Wine" ]] \
+            || { echo "::error::run $wine is not a Build Wine run"; exit 1; }
+          [[ "$(gh run view "$gfx" --repo "$REPO" --json workflowName --jq .workflowName)" == "Build graphics layers" ]] \
+            || { echo "::error::run $gfx is not a Build graphics layers run"; exit 1; }
+          {
+            echo "wine_run=$wine"
+            echo "graphics_run=$gfx"
+            echo "wine_sha=$(gh run view "$wine" --repo "$REPO" --json headSha --jq .headSha)"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Download the runtimes
+        id: download
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          WINE_RUN: ${{ steps.runs.outputs.wine_run }}
+          GRAPHICS_RUN: ${{ steps.runs.outputs.graphics_run }}
+        run: |
+          in="$RUNNER_TEMP/in"
+          out="$RUNNER_TEMP/dist"
+          mkdir -p "$in" "$out"
+          gh run download "$WINE_RUN" --repo "$REPO" --pattern 'wine-crossover-*' --dir "$in/wine"
+          gh run download "$GRAPHICS_RUN" --repo "$REPO" --pattern 'dxmt-*' --pattern 'dxvk-macos-*' --dir "$in/gfx"
+          find "$in" -type f -exec ls -l {} +
+          one() {
+            local found
+            mapfile -t found < <(find "$1" -type f -name "$2")
+            (( ${#found[@]} == 1 )) || { echo "::error::expected one $2, found ${#found[@]}: ${found[*]}" >&2; exit 1; }
+            mv "${found[0]}" "$out/"
+            basename "${found[0]}"
+          }
+          wine=$(one "$in/wine" 'wine-crossover-*-wow64.tar.xz')
+          dxmt=$(one "$in/gfx" 'dxmt-*.tar.xz')
+          dxvk=$(one "$in/gfx" 'dxvk-macos-*.tar.xz')
+          cx=${wine#wine-crossover-}; cx=${cx%-wow64.tar.xz}
+          dxmt_v=${dxmt#dxmt-}; dxmt_v=${dxmt_v%.tar.xz}
+          dxvk_v=${dxvk#dxvk-macos-}; dxvk_v=${dxvk_v%.tar.xz}
+          {
+            echo "dir=$out"; echo "cx=$cx"; echo "dxmt=$dxmt"; echo "dxmt_version=$dxmt_v"; echo "dxvk=$dxvk"; echo "dxvk_version=$dxvk_v"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Check the runtimes
+        env:
+          DIST: ${{ steps.download.outputs.dir }}
+          CX: ${{ steps.download.outputs.cx }}
+          DXMT: ${{ steps.download.outputs.dxmt }}
+          DXMT_VERSION: ${{ steps.download.outputs.dxmt_version }}
+          DXVK: ${{ steps.download.outputs.dxvk }}
+          DXVK_VERSION: ${{ steps.download.outputs.dxvk_version }}
+          WINE_SHA: ${{ steps.runs.outputs.wine_sha }}
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          fail() { echo "::error::$*"; exit 1; }
+          wine="wine-crossover-$CX-wow64.tar.xz"
+          for f in "$DIST"/*.tar.xz; do
+            tar -tJf "$f" > "$f.list"
+            # Apple's D3DMetal (Game Porting Toolkit) may only be redistributed non-commercially: never ship it.
+            if grep -iE 'd3dmetal|libd3dshared|gptk' "$f.list"; then fail "$(basename "$f") contains D3DMetal / GPTK files"; fi
+          done
+          grep -qx 'wine/bin/wine' "$DIST/$wine.list" || fail "$wine has no wine/bin/wine"
+          grep -qx 'dxmt/x86_64-unix/winemetal.so' "$DIST/$DXMT.list" || fail "$DXMT has no winemetal.so"
+          grep -qx 'dxvk/x64/d3d11.dll' "$DIST/$DXVK.list" || fail "$DXVK has no x64/d3d11.dll"
+          rm "$DIST"/*.list
+          # DXMT's DLLs are Wine builtins linked against one Wine build: it must be this one.
+          built=$(tar -xJOf "$DIST/$DXMT" dxmt/VERSION | sed -n 's/^Built against Wine: //p')
+          echo "DXMT was built against: $built"
+          [[ "$built" == "wine-crossover-$CX-wow64" ]] || fail "$DXMT was built against '$built', not wine-crossover-$CX-wow64"
+
+          # THIRD_PARTY_NOTICES.md must describe exactly these versions.
+          n=THIRD_PARTY_NOTICES.md
+          need() { grep -qF -- "$1" "$n" || fail "$n does not mention '$1': update it for this release (docs/RELEASING.md)"; }
+          need "crossover-sources-$CX.tar.gz"
+          need "## DXMT $DXMT_VERSION"
+          need "## DXVK-macOS $DXVK_VERSION"
+          # Nettle and MoltenVK versions as pinned in build-wine.sh at the commit the Wine artifact was built from.
+          script=$(gh api "repos/$REPO/contents/scripts/build-wine.sh?ref=$WINE_SHA" --jq .content | base64 -d)
+          pin() { sed -n "s/^$1=\([^ ]*\).*/\1/p" <<<"$script"; }
+          nettle=$(pin NETTLE_VERSION); nettle_sha=$(pin NETTLE_SHA256); mvk=$(pin MVK_VERSION)
+          [[ -n "$nettle" && -n "$nettle_sha" && -n "$mvk" ]] || fail "cannot read the pins from build-wine.sh at $WINE_SHA"
+          need "nettle-$nettle.tar.gz"
+          need "$nettle_sha"
+          need "## MoltenVK $mvk"
+          echo "NETTLE_VERSION=$nettle" >> "$GITHUB_ENV"
+          echo "NETTLE_SHA256=$nettle_sha" >> "$GITHUB_ENV"
+
+      - name: Fetch the corresponding source
+        env:
+          DIST: ${{ steps.download.outputs.dir }}
+          CX: ${{ steps.download.outputs.cx }}
+        run: |
+          # Wine, FreeType, GnuTLS and GMP (LGPL) come from the CrossOver source release and Nettle from
+          # GNU, unmodified. Attaching them to the release keeps them available next to the binaries.
+          # The CrossOver tarball must match the SHA-256 recorded in THIRD_PARTY_NOTICES.md.
+          want=$(python3 -I - "$CX" THIRD_PARTY_NOTICES.md <<'PY'
+          import re, sys
+          cx, path = sys.argv[1], sys.argv[2]
+          m = re.search(re.escape(f"crossover-sources-{cx}.tar.gz") + r">\s*\(SHA-256 `([0-9a-f]{64})`", open(path).read())
+          print(m.group(1) if m else "")
+          PY
+          )
+          [[ -n "$want" ]] || { echo "::error::THIRD_PARTY_NOTICES.md has no SHA-256 for crossover-sources-$CX.tar.gz"; exit 1; }
+          curl -fsSL --retry 3 -o "$DIST/crossover-sources-$CX.tar.gz" \
+            "https://media.codeweavers.com/pub/crossover/source/crossover-sources-$CX.tar.gz"
+          curl -fsSL --retry 3 -o "$DIST/nettle-$NETTLE_VERSION.tar.gz" \
+            "https://ftp.gnu.org/gnu/nettle/nettle-$NETTLE_VERSION.tar.gz"
+          (cd "$DIST" && sha256sum -c - <<EOF
+          $want  crossover-sources-$CX.tar.gz
+          $NETTLE_SHA256  nettle-$NETTLE_VERSION.tar.gz
+          EOF
+          )
+          ls -l "$DIST"
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-runtime
+          path: ${{ steps.download.outputs.dir }}
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
+
+  publish:
+    name: Publish the release
+    needs: [app, runtime]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write # create the release and upload its assets
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: release-*
+          merge-multiple: true
+          path: ${{ runner.temp }}/dist
+
+      - name: SHA256SUMS and manifest.json
+        env:
+          VERSION: ${{ needs.app.outputs.version }}
+        run: |
+          python3 -I scripts/release-manifest.py "$VERSION" "$RUNNER_TEMP/dist"
+          (cd "$RUNNER_TEMP/dist" && sha256sum -c SHA256SUMS)
+          if unzip -l "$RUNNER_TEMP/dist/MacGaming-$VERSION.zip" | grep -iE 'd3dmetal|libd3dshared'; then
+            echo "::error::the app contains D3DMetal files"; exit 1
+          fi
+          ls -l "$RUNNER_TEMP/dist"
+
+      - name: Release notes
+        env:
+          VERSION: ${{ needs.app.outputs.version }}
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          WINE_RUN: ${{ needs.runtime.outputs.wine_run }}
+          GRAPHICS_RUN: ${{ needs.runtime.outputs.graphics_run }}
+        run: |
+          # shellcheck disable=SC2016 # backticks are Markdown inside a jq string
+          run_line() { gh run view "$1" --repo "$REPO" --json workflowName,url,headSha --jq '"[\(.workflowName)](\(.url)) at `\(.headSha[0:12])`"'; }
+          {
+            echo "## Install"
+            echo
+            echo "1. Download **MacGaming-$VERSION.zip**, open it, and move **Mac Gaming** to Applications."
+            echo "2. The first time, macOS blocks the app because it is not notarized yet. Open it once, then go to"
+            echo "   **System Settings → Privacy & Security**, click **Open Anyway** and confirm. Step by step:"
+            echo "   [docs/INSTALL.md](https://github.com/$REPO/blob/v$VERSION/docs/INSTALL.md)."
+            echo "3. Install the runtimes (\`wine-crossover-*\`, \`dxmt-*\`, \`dxvk-macos-*\`) from **Runtimes** in the app,"
+            echo "   or with \`mgx runtime install\`."
+            echo
+            echo "Check downloads with \`shasum -a 256 -c SHA256SUMS\`. Licenses: THIRD_PARTY_NOTICES.md (in the app:"
+            echo "Mac Gaming → Acknowledgements; \`mgx licenses\`). The \`crossover-sources-*\` and \`nettle-*\` tarballs"
+            echo "are the source code of the LGPL components."
+            echo
+            echo "Built from \`${GITHUB_SHA:0:12}\`. Runtimes from $(run_line "$WINE_RUN") and $(run_line "$GRAPHICS_RUN")."
+            echo
+          } > "$RUNNER_TEMP/notes.md"
+          cat "$RUNNER_TEMP/notes.md"
+
+      - name: Create the release
+        env:
+          VERSION: ${{ needs.app.outputs.version }}
+          EVENT: ${{ github.event_name }}
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          tag="v$VERSION"
+          if gh release view "$tag" --repo "$REPO" >/dev/null 2>&1; then
+            echo "::error::a release $tag already exists (delete the draft first, or bump the version)"; exit 1
+          fi
+          args=(--repo "$REPO" --title "MacGaming $VERSION" --notes-file "$RUNNER_TEMP/notes.md" --generate-notes)
+          if [[ "$EVENT" == push ]]; then
+            args+=(--verify-tag)
+          else
+            args+=(--draft --target "$GITHUB_SHA")
+          fi
+          # A version with a pre-release part (1.0.0-beta.1) is a prerelease, which releases/latest skips.
+          if [[ "$VERSION" == *-* ]]; then args+=(--prerelease); fi
+          # gh uploads the assets to a draft and publishes it only afterwards, so releases/latest never
+          # points at a release with missing assets.
+          gh release create "$tag" "${args[@]}" "$RUNNER_TEMP"/dist/*
+
+      - name: Check the release
+        env:
+          VERSION: ${{ needs.app.outputs.version }}
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          tag="v$VERSION"
+          gh release view "$tag" --repo "$REPO" --json url,isDraft,isPrerelease,assets \
+            --jq '"\(.url) draft=\(.isDraft) prerelease=\(.isPrerelease)", (.assets[] | "  \(.name) \(.size)")'
+          want=$(find "$RUNNER_TEMP/dist" -maxdepth 1 -type f -printf '%f\n' | sort)
+          got=$(gh release view "$tag" --repo "$REPO" --json assets --jq '.assets[].name' | sort)
+          [[ "$want" == "$got" ]] || { echo "::error::release assets differ from the build"; diff <(echo "$want") <(echo "$got"); exit 1; }
+          mkdir -p "$RUNNER_TEMP/check"
+          gh release download "$tag" --repo "$REPO" --pattern manifest.json --dir "$RUNNER_TEMP/check"
+          cmp "$RUNNER_TEMP/check/manifest.json" "$RUNNER_TEMP/dist/manifest.json"
+          cat "$RUNNER_TEMP/check/manifest.json"
