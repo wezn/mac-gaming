@@ -47,6 +47,13 @@ final class EnvironmentTests: XCTestCase {
         XCTAssertEqual(env["PATH"], "/usr/bin")
     }
 
+    func testMoltenVKQuietUnlessUserSetIt() {
+        XCTAssertEqual(EnvironmentBuilder.build(base: [:], spec: spec())["MVK_CONFIG_LOG_LEVEL"], "2")
+        XCTAssertEqual(EnvironmentBuilder.build(base: ["MVK_CONFIG_LOG_LEVEL": "3"], spec: spec())["MVK_CONFIG_LOG_LEVEL"], "3")
+        let viaBottle = EnvironmentBuilder.build(base: [:], spec: spec { $0.bottleEnv = ["MVK_CONFIG_LOG_LEVEL": "4"] })
+        XCTAssertEqual(viaBottle["MVK_CONFIG_LOG_LEVEL"], "4")
+    }
+
     func testMsyncOffRemovesInherited() {
         let env = EnvironmentBuilder.build(base: ["WINEMSYNC": "1"], spec: spec { $0.msync = false })
         XCTAssertNil(env["WINEMSYNC"])

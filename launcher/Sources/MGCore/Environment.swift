@@ -55,6 +55,9 @@ public enum EnvironmentBuilder {
         if spec.msync { env["WINEMSYNC"] = "1" } else { env["WINEMSYNC"] = nil }
         if spec.metalHUD { env["MTL_HUD_ENABLED"] = "1" }
         if let dbg = spec.wineDebug { env["WINEDEBUG"] = dbg } else if env["WINEDEBUG"] == nil { env["WINEDEBUG"] = "-all" }
+        // MoltenVK logs at info level by default: ~170 lines (its extension list) every time a process
+        // creates a Vulkan instance, which buried the real errors in Battle.net logs. Warnings and errors only.
+        if env["MVK_CONFIG_LOG_LEVEL"] == nil { env["MVK_CONFIG_LOG_LEVEL"] = "2" }
 
         let libDirs = spec.libraryDirs.map(\.path) + [spec.wineRoot.appendingPathComponent("lib").path]
         let existing = (env["DYLD_FALLBACK_LIBRARY_PATH"] ?? "").split(separator: ":").map(String.init)
