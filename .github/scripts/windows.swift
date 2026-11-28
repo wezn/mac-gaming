@@ -45,9 +45,13 @@ if args.count == 4, args[1] == "--lit" {
         ctx?.draw(crop, in: CGRect(x: 0, y: 0, width: w, height: h))
     }
     var lit = 0
-    for i in stride(from: 0, to: px.count, by: 4) where Int(px[i]) + Int(px[i + 1]) + Int(px[i + 2]) > 24 { lit += 1 }
-    print(String(format: "lit %.1f%% of %dx%d at %d,%d", 100 * Double(lit) / Double(max(1, w * h)),
-                 Int(win.rect.width), Int(win.rect.height), Int(win.rect.minX), Int(win.rect.minY)))
+    for i in stride(from: 0, to: px.count, by: 4) {
+        let r = Int(px[i]), g = Int(px[i + 1]), b = Int(px[i + 2])
+        if r + g + b > 24 { lit += 1 }
+    }
+    let percent: Double = 100 * Double(lit) / Double(max(1, w * h))
+    let size = "\(Int(win.rect.width))x\(Int(win.rect.height)) at \(Int(win.rect.minX)),\(Int(win.rect.minY))"
+    print(String(format: "lit %.1f%% of ", percent) + size)
     exit(0)
 }
 for w in wineWindows() {
