@@ -14,6 +14,8 @@ public enum MGError: Error, CustomStringConvertible, Equatable {
     case invalidConfig(String)
     case processFailed(String, Int32)
     case io(String)
+    /// Fetching, verifying or installing an update.
+    case update(String)
 
     public var description: String {
         switch self {
@@ -26,7 +28,7 @@ public enum MGError: Error, CustomStringConvertible, Equatable {
         case .runtimeNotFound(let n):
             return "runtime '\(n)' is not installed (see `mgx runtime list`)"
         case .noRuntime:
-            return "no runtime installed: run `mgx runtime install <wine-crossover-*.tar.xz | dir>`"
+            return "no runtime installed: run `mgx runtime update` to download one, or `mgx runtime install <wine-crossover-*.tar.xz | dir>`"
         case .ambiguousRuntime(let names):
             return "several runtimes are installed (\(names.joined(separator: ", "))): pick one with `mgx config set default-runtime <name>` or `--runtime`"
         case .backendUnavailable(let b, let hint):
@@ -39,7 +41,7 @@ public enum MGError: Error, CustomStringConvertible, Equatable {
             return m
         case .processFailed(let what, let code):
             return "\(what) failed with exit code \(code)"
-        case .io(let m):
+        case .io(let m), .update(let m):
             return m
         }
     }

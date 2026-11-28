@@ -13,9 +13,11 @@ struct MacGamingApp: App {
             ContentView()
                 .environmentObject(model)
                 .frame(minWidth: 860, minHeight: 540)
+                .onAppear { UpdateController.shared.start(model: model) }
         }
         .defaultSize(width: 1100, height: 720)
         .commands {
+            UpdateCommands()
             CommandGroup(replacing: .newItem) {
                 Button("New Bottle…") { model.showingNewBottle = true }
                     .keyboardShortcut("n")
@@ -33,6 +35,8 @@ struct MacGamingApp: App {
             SettingsView()
                 .environmentObject(model)
         }
+
+        AcknowledgementsWindow()
     }
 }
 

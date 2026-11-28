@@ -21,6 +21,9 @@ swift test
 
 macOS 13+ is required at run time. macOS 15+ is recommended: Rosetta 2 translates AVX/AVX2 only from macOS 15.
 
+**Releases:** [GitHub Releases](https://github.com/wezn/mac-gaming/releases/latest) carry `mgx-<version>-macos-arm64.tar.gz`
+(`mgx` plus `THIRD_PARTY_NOTICES.md`), the app and the runtimes; see [docs/INSTALL.md](../docs/INSTALL.md).
+
 **Prebuilt:** every Launcher workflow run uploads an arm64 release build as the `mgx-macos-arm64` artifact
 (`mgx-macos-arm64.tar.gz` plus its SHA-256). It is unsigned: `gh run download` leaves it runnable, but a copy
 downloaded with a browser is quarantined and needs `xattr -d com.apple.quarantine mgx` first.
@@ -58,8 +61,14 @@ What it does (v1):
   when DXMT was built against a different Wine; the run plan names the Wine tree it will use.
 - **Doctor**: the `mgx doctor` checks. **Copy Diagnostics** puts a redacted `mgx report` (without
   logs) on the clipboard; **Save Report…** writes the full `.tar.gz`. **Logs**: every run log, with a live tail.
+- **Acknowledgements** (Mac Gaming menu): the third-party notices bundled in `Contents/Resources`.
 - **Activity**: each background job (wineboot, an install, a running program) with mgx's progress
-  lines and its Wine log, tailing live. Settings (⌘,): GPTK path, default runtime and bottle.
+  lines and its Wine log, tailing live. Settings (⌘,): GPTK path, default runtime and bottle, updates.
+- **First run**: with no runtime installed, Runtimes offers **Download Runtime** (the latest release's
+  Wine, DXMT and DXVK, with progress; same code as `mgx runtime update`). Later releases show
+  **Update Runtime** there.
+- **Check for Updates…** (app menu, and once a day unless turned off in Settings or the update window):
+  see [Updates](#updates).
 
 Long-running work never blocks the main thread: views call view models in the app target, which run
 MGCore's synchronous APIs through `Blocking.run` (MGCore/Async.swift: one thread per call, so waiting
@@ -72,7 +81,9 @@ The app target is only declared on macOS (`#if os(macOS)` in Package.swift), so 
 `swift test` still work on Linux. CI builds the bundle on `macos-15`, launches it headlessly against a
 demo data folder (it must stay up for 8 seconds per screen), and uploads the app and screenshots.
 `-MGInitialSection runtimes|doctor|logs|bottle:<name>` and `-MGPreviewRun <exe>` choose the first
-screen (used for the screenshots).
+screen (used for the screenshots). CI also updates a copy of the app from a fake release
+(`Scripts/make_fake_release.sh`, served on 127.0.0.1) with `-MGCheckForUpdatesOnLaunch YES
+-MGAutoInstallUpdate YES`, and checks that the bundle was swapped, still verifies, and was relaunched.
 
 **Not done yet:** signing with a Developer ID, the hardened runtime and notarization need the owner's
 certificate and Apple ID (see the TODO in `Scripts/make_app.sh`). Quitting the app does not stop
@@ -81,8 +92,9 @@ running games (use Stop All first).
 ## Quick start
 
 ```sh
-# 1. Install the Wine build (and optionally graphics backends). Pass files, zipped CI
-#    artifacts, or a directory containing them.
+# 1. Download the latest release's Wine, DXMT and DXVK (checked against the release's SHA-256s)…
+mgx runtime update
+#    …or install archives you already have. Pass files, zipped CI artifacts, or a directory containing them.
 mgx runtime install ~/Downloads/wine-crossover-26.3.0-wow64.tar.xz \
                    ~/Downloads/dxmt-0.80.tar.xz ~/Downloads/dxvk-macos-1.10.3-20230507-repack.tar.xz
 
@@ -101,6 +113,7 @@ mgx run ~/Games/SomeGame/Game.exe -windowed
 | Command | What it does |
 |---|---|
 | `mgx runtime install <path>...` | Install `wine-crossover-*.tar.xz`, `dxmt-*.tar.xz`, `dxvk-macos-*.tar.xz` (or zips / directories containing them). `--name`, `--set-default` |
+| `mgx runtime update` | Download and install the latest release's Wine, DXMT and DXVK. Skips components already installed at that version; a new Wine becomes a new default runtime. `--check` only reports |
 | `mgx runtime list` / `remove <name>` | List or remove runtimes |
 | `mgx bottle create <name>` | Create a bottle and run `wineboot --init`. `--runtime`, `--backend`, `--no-msync`, `--retina`, `--hud`, `--env K=V`, `--no-init`, `--set-default` |
 | `mgx bottle list` / `show <name>` | List bottles, or print a bottle's path and config |
@@ -111,9 +124,11 @@ mgx run ~/Games/SomeGame/Game.exe -windowed
 | `mgx detect <exe>` | Show an executable's imports and detected DirectX version |
 | `mgx steam install --bottle B` / `mgx steam run --bottle B` | Download the official Steam installer, install silently, start the client |
 | `mgx battlenet install --bottle B` / `mgx battlenet run --bottle B` | Same for Battle.net (its installer is interactive) |
-| `mgx config [show]` / `set <key> <value>` / `unset <key>` | Keys: `gptk`, `default-runtime`, `default-bottle` |
-| `mgx doctor` | Check macOS version, Apple Silicon, Rosetta, runtimes, MoltenVK, DXMT, DXVK, the GPTK path (and its version), the D3DMetal overlay and bottles. Exits 1 on errors. `--json` for machine-readable output |
+| `mgx self-update` | Replace this `mgx` with the latest release's (atomic rename; the new binary must run and report the release's version first). `--check`, `--force` |
+| `mgx config [show]` / `set <key> <value>` / `unset <key>` | Keys: `gptk`, `default-runtime`, `default-bottle`, `update-url` |
+| `mgx doctor` | Check macOS version, Apple Silicon, Rosetta, runtimes, MoltenVK, DXMT, DXVK, the GPTK path (and its version), the D3DMetal overlay and bottles, and whether the last release seen (cached; the doctor never goes online) has a newer app or runtime. Exits 1 on errors. `--json` for machine-readable output |
 | `mgx report` | Bundle host facts, doctor (text and JSON), settings, runtime manifests, the DXMT and D3DMetal overlay state, bottle settings and the newest logs into `mgx-report-<time>.tar.gz` for a bug report. `$HOME` becomes `~`, your account name `USER`. `-o PATH` (a directory unless it ends in `.tar.gz`), `--logs N`, `--log-kib N` |
+| `mgx licenses` | Print `THIRD_PARTY_NOTICES.md` (the licenses of everything mgx, the app and the runtimes ship), which sits next to `mgx` in the release tarball. `--path` prints where it is |
 | `mgx logs` | List per-run logs. `--last` prints the newest, `--path` prints paths only, `--bottle B`, `-n N` |
 
 ### `mgx run`
@@ -230,6 +245,8 @@ runtimes/<name>/            wine/, dxmt/, dxvk/, wine-dxmt/ and wine-d3dmetal/ (
 bottles/<name>/             the Wine prefix (drive_c, *.reg) plus bottle.json
 logs/<bottle>/<time>-<exe>.log   one per run, newest 50 kept per bottle
 cache/installers/           SteamSetup.exe, Battle.net-Setup.exe
+cache/updates/latest.json   the last release manifest fetched (read by `mgx doctor`)
+cache/updates/<version>/    release downloads (verified; runtime archives are deleted once installed)
 ```
 
 `bottle.json`:
@@ -249,10 +266,49 @@ cache/installers/           SteamSetup.exe, Battle.net-Setup.exe
 `runtime` is omitted when the bottle follows the default runtime. `MG_GPTK` overrides the
 configured GPTK path for one command.
 
+## Updates
+
+Releases are GitHub Releases with a `manifest.json`
+(`https://github.com/wezn/mac-gaming/releases/latest/download/manifest.json`):
+
+```json
+{"version": "0.2.0", "published": "2026-11-28T12:00:00Z",
+ "app": {"file": "MacGaming-0.2.0.zip", "sha256": "…"},
+ "mgx": {"file": "mgx-0.2.0-macos-arm64.tar.gz", "sha256": "…"},
+ "runtime": [{"kind": "wine", "file": "wine-crossover-26.3.0-wow64.tar.xz", "version": "crossover-26.3.0-wow64", "sha256": "…"},
+             {"kind": "dxmt", "file": "dxmt-0.80.tar.xz", "version": "0.80", "sha256": "…"},
+             {"kind": "dxvk", "file": "dxvk-macos-1.10.3-20230507-repack.tar.xz", "version": "1.10.3-20230507-repack", "sha256": "…"}]}
+```
+
+Each file is fetched from `…/releases/download/v<version>/<file>` (pinned to that release, not `latest`).
+A runtime `version` is spelled the way `mgx runtime install` records it in runtime.json (from the archive
+name), and a component counts as installed when its recorded archive or version matches. Other release
+assets (sources, SHA256SUMS) are not in the manifest and are ignored.
+An optional `"size"` (bytes) per file gives the app a determinate progress bar; without it the app asks
+the server with a HEAD request.
+
+- **Why in-app:** a browser download is quarantined, so an ad-hoc signed app or mgx needs "Open Anyway"
+  again after every update. mgx and the app download with `/usr/bin/curl`, which sets no quarantine flag.
+- **Verification:** every file must match the manifest's SHA-256 (CryptoKit) or it is deleted and nothing
+  is installed. File names must be plain names (no `/`, no leading `.`). The new mgx must run and print
+  the release's version; the new app must pass `codesign --verify --deep --strict` (ad-hoc is fine) and
+  have the same bundle identifier and the release's `CFBundleShortVersionString`. The release workflow
+  must therefore build with `MGVersion.string` (Sources/MGCore/Paths.swift) equal to the tag.
+- **App update:** the zip is unpacked with `ditto` on the same volume, the bundle is swapped with one
+  `renamex_np(RENAME_SWAP)`, then the app restarts through `open`. If the app runs from a read-only or
+  translocated location (opened straight from Downloads, or a disk image), it says to move it to
+  Applications first. Running games keep running across the restart.
+- **Source:** `MG_UPDATE_URL` or `mgx config set update-url <url>` points mgx and the app elsewhere: a
+  `…/manifest.json` URL or a directory (files are then fetched next to the manifest), a local path or
+  `file://` URL, or `http://` on 127.0.0.1/localhost (HTTPS is required everywhere else). A
+  `https://github.com/<owner>/<repo>/releases/latest/download/` URL keeps the release layout (forks).
+  `Scripts/make_fake_release.sh` builds a stub release for testing.
+
 ## Design notes
 
 - **No shell in the launch path.** Wine and helper tools are started with `posix_spawn` and an
-  explicit environment. Downloads use `/usr/bin/curl` (HTTPS only), archives use `/usr/bin/tar` and `ditto`.
+  explicit environment. Downloads use `/usr/bin/curl` (HTTPS only, except `file://` and loopback `http://`
+  for tests), archives use `/usr/bin/tar` and `ditto`.
 - **Planning has no side effects.** `Launcher.plan` resolves everything (bottle, runtime, detection,
   backend, environment) without touching disk, `prepare` makes the bottle match (each step skipped
   when already done), and `execute` starts Wine. `--dry-run` stops after the plan, and a GUI can show it.

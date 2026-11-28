@@ -53,20 +53,101 @@ public enum Store: String, CaseIterable, Sendable {
 
 public enum Downloader {
     /// Downloads with the system curl (HTTPS only, follows redirects, retries), atomically replacing `destination`.
-    public static func download(_ url: URL, to destination: URL, quiet: Bool = false) throws {
-        try FileManager.default.createDirectory(at: destination.deletingLastPathComponent(), withIntermediateDirectories: true)
+    ///
+    /// Two exceptions, for local test servers and fixtures: `file://` URLs are copied, and plain `http://`
+    /// is accepted for loopback hosts (127.0.0.1, ::1, localhost) only. Redirects must always be HTTPS.
+    /// `progress` gets the number of bytes received so far, a few times a second, from another thread.
+    public static func download(_ url: URL, to destination: URL, quiet: Bool = false, maxTime: Int? = nil,
+                                progress: ((Int64) -> Void)? = nil) throws {
+        let fm = FileManager.default
+        try fm.createDirectory(at: destination.deletingLastPathComponent(), withIntermediateDirectories: true)
         let part = destination.appendingPathExtension("part")
-        try? FileManager.default.removeItem(at: part)
-        var args = ["-fL", "--proto", "=https", "--proto-redir", "=https", "--retry", "3", "-o", part.path]
-        args.insert(quiet ? "-sS" : "--progress-bar", at: 0)
-        args.append(url.absoluteString)
-        let code = try Subprocess.run(URL(fileURLWithPath: "/usr/bin/curl"), args,
-                                      environment: ProcessInfo.processInfo.environment, output: .inherit)
-        guard code == 0 else {
-            try? FileManager.default.removeItem(at: part)
-            throw MGError.processFailed("downloading \(url.absoluteString)", code)
+        try? fm.removeItem(at: part)
+        if url.isFileURL {
+            do { try fm.copyItem(at: url, to: part) } catch {
+                throw MGError.io("cannot read \(url.path): \(error.localizedDescription)")
+            }
+        } else {
+            var args = ["-fL", "--proto", try allowedProtocols(url), "--proto-redir", "=https", "--retry", "3",
+                        "--connect-timeout", "30", "-o", part.path]
+            args.insert(quiet ? "-sS" : "--progress-bar", at: 0)
+            if let maxTime { args += ["--max-time", "\(maxTime)"] }
+            args.append(url.absoluteString)
+            let poller = progress.map { ProgressPoller(file: part, report: $0) }
+            let code: Int32
+            do {
+                code = try Subprocess.run(URL(fileURLWithPath: "/usr/bin/curl"), args,
+                                          environment: ProcessInfo.processInfo.environment, output: .inherit)
+                poller?.stop()
+            } catch {
+                poller?.stop()
+                throw error
+            }
+            guard code == 0 else {
+                try? fm.removeItem(at: part)
+                throw MGError.processFailed("downloading \(url.absoluteString)", code)
+            }
         }
-        if FileManager.default.fileExists(atPath: destination.path) { try FileManager.default.removeItem(at: destination) }
-        try FileManager.default.moveItem(at: part, to: destination)
+        if let progress, let size = fileSize(part) { progress(size) }
+        if fm.fileExists(atPath: destination.path) { try fm.removeItem(at: destination) }
+        try fm.moveItem(at: part, to: destination)
     }
+
+    /// Best-effort size of what `url` serves (a HEAD request, following redirects); nil if unknown.
+    public static func contentLength(_ url: URL) -> Int64? {
+        if url.isFileURL { return fileSize(url) }
+        guard let proto = try? allowedProtocols(url) else { return nil }
+        let out = FileManager.default.temporaryDirectory.appendingPathComponent("mgx-head-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: out) }
+        let args = ["-sSIL", "--proto", proto, "--proto-redir", "=https", "--max-time", "20", "-o", out.path, url.absoluteString]
+        guard (try? Subprocess.run(URL(fileURLWithPath: "/usr/bin/curl"), args,
+                                   environment: ProcessInfo.processInfo.environment, output: .null)) == 0,
+              let text = try? String(contentsOf: out, encoding: .utf8) else { return nil }
+        return parseContentLength(headers: text)
+    }
+
+    /// The last `Content-Length` in `curl -I -L` output (one header block per redirect).
+    static func parseContentLength(headers: String) -> Int64? {
+        var last: Int64?
+        for line in headers.split(whereSeparator: \.isNewline) {
+            let parts = line.split(separator: ":", maxSplits: 1)
+            guard parts.count == 2, parts[0].trimmingCharacters(in: .whitespaces).lowercased() == "content-length" else { continue }
+            last = Int64(parts[1].trimmingCharacters(in: .whitespaces))
+        }
+        return last.flatMap { $0 > 0 ? $0 : nil }
+    }
+
+    /// curl `--proto` value: HTTPS, or HTTP too for a loopback host.
+    static func allowedProtocols(_ url: URL) throws -> String {
+        switch url.scheme?.lowercased() {
+        case "https": return "=https"
+        case "http" where isLoopback(url): return "=http,https"
+        default: throw MGError.io("refusing to download \(url.absoluteString): only HTTPS is allowed")
+        }
+    }
+
+    static func isLoopback(_ url: URL) -> Bool {
+        guard let host = url.host?.lowercased() else { return false }
+        return ["127.0.0.1", "localhost", "::1", "[::1]"].contains(host)
+    }
+
+    static func fileSize(_ url: URL) -> Int64? {
+        (try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? NSNumber)?.int64Value
+    }
+}
+
+/// Reports the size of a growing file a few times a second until stopped.
+final class ProgressPoller: @unchecked Sendable {
+    private let timer: DispatchSourceTimer
+
+    init(file: URL, report: @escaping (Int64) -> Void) {
+        timer = DispatchSource.makeTimerSource(queue: DispatchQueue.global(qos: .utility))
+        timer.schedule(deadline: .now() + .milliseconds(250), repeating: .milliseconds(250))
+        timer.setEventHandler {
+            if let size = Downloader.fileSize(file) { report(size) }
+        }
+        timer.resume()
+    }
+
+    func stop() { timer.cancel() }
 }

@@ -11,7 +11,7 @@ struct MG: ParsableCommand {
         abstract: "Run Windows games on Apple Silicon Macs.",
         version: MG.version,
         subcommands: [Run.self, BottleCommand.self, RuntimeCommand.self, SteamCommand.self, BattlenetCommand.self,
-                      ConfigCommand.self, Detect.self, Doctor.self, Logs.self, Report.self]
+                      ConfigCommand.self, Detect.self, Doctor.self, Logs.self, Report.self, SelfUpdate.self, Licenses.self]
     )
     static let version = MGVersion.string
 }
@@ -293,7 +293,7 @@ struct BottleCommand: ParsableCommand {
 struct RuntimeCommand: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "runtime", abstract: "Install and manage Wine runtimes and graphics backends.",
-        subcommands: [Install.self, List.self, Remove.self])
+        subcommands: [Install.self, Update.self, List.self, Remove.self])
 
     struct Install: ParsableCommand {
         static let configuration = CommandConfiguration(
@@ -313,6 +313,41 @@ struct RuntimeCommand: ParsableCommand {
                 let urls = sources.map { URL(fileURLWithPath: ($0 as NSString).expandingTildeInPath) }
                 let r = try RuntimeStore(paths: Context.paths).install(sources: urls, name: name, makeDefault: setDefault,
                                                                       log: { Context.note($0) })
+                print("runtime \(r.runtime): installed \(r.installed.keys.sorted().joined(separator: ", "))\(r.madeDefault ? " (default)" : "")")
+            }
+        }
+    }
+
+    struct Update: ParsableCommand {
+        static let configuration = CommandConfiguration(
+            abstract: "Download and install the latest release's Wine, DXMT and DXVK.",
+            discussion: """
+            Reads the latest release's manifest.json (GitHub Releases, or MG_UPDATE_URL / `mgx config set
+            update-url`), skips components the runtime already has at that version, and checks every
+            download's SHA-256 before installing. A new Wine version becomes a new runtime (named after its
+            archive, e.g. crossover-26.3.0-wow64) and the default; older runtimes stay until removed.
+            """)
+        @Flag(help: "Only report what would be installed.") var check = false
+
+        func run() throws {
+            try guarded {
+                var updater = try Updater.standard(paths: Context.paths)
+                Context.note("checking \(updater.source)")
+                let m = try updater.fetchManifest()
+                let plan = try updater.planRuntimeUpdate(m)
+                for a in plan.current { print("up to date: \(a.kind) \(a.version) (\(a.file))") }
+                if plan.isUpToDate {
+                    print("runtime \(plan.runtime) is up to date (release \(m.version))")
+                    return
+                }
+                for a in plan.install { print("\(check ? "available" : "installing"): \(a.kind) \(a.version) (\(a.file))") }
+                if check {
+                    print("run `mgx runtime update` to install \(plan.isNewRuntime ? "runtime \(plan.runtime)" : "into runtime \(plan.runtime)")")
+                    return
+                }
+                fflush(stdout)
+                updater.download = { try Downloader.download($0, to: $1) }   // with a progress bar
+                guard let r = try updater.updateRuntime(m, plan: plan, log: { Context.note($0) }) else { return }
                 print("runtime \(r.runtime): installed \(r.installed.keys.sorted().joined(separator: ", "))\(r.madeDefault ? " (default)" : "")")
             }
         }
@@ -417,11 +452,11 @@ struct BattlenetCommand: ParsableCommand, StoreCommand {
 
 struct ConfigCommand: ParsableCommand {
     static let configuration = CommandConfiguration(
-        commandName: "config", abstract: "Global settings: gptk, default-runtime, default-bottle.",
+        commandName: "config", abstract: "Global settings: gptk, default-runtime, default-bottle, update-url.",
         subcommands: [Show.self, SetValue.self, Unset.self], defaultSubcommand: Show.self)
 
     enum Key: String, ExpressibleByArgument, CaseIterable {
-        case gptk, defaultRuntime = "default-runtime", defaultBottle = "default-bottle"
+        case gptk, defaultRuntime = "default-runtime", defaultBottle = "default-bottle", updateURL = "update-url"
     }
 
     struct Show: ParsableCommand {
@@ -434,6 +469,7 @@ struct ConfigCommand: ParsableCommand {
                 print("gptk:            \(c.gptkPath ?? "(not set)")")
                 print("default-runtime: \(c.defaultRuntime ?? "(not set)")")
                 print("default-bottle:  \(c.defaultBottle ?? "(not set: 'default')")")
+                print("update-url:      \(c.updateURL ?? "(not set: \(UpdateSource.default))")")
                 print("overrides:       \(paths.overridesFile.path)")
             }
         }
@@ -451,6 +487,7 @@ struct ConfigCommand: ParsableCommand {
                     if let g = try launcher.setGPTKPath(value) { print("D3DMetal from \(g.libRoot.path)") }
                 case .defaultRuntime: try launcher.setDefaultRuntime(value)
                 case .defaultBottle: try launcher.setDefaultBottle(value)
+                case .updateURL: try launcher.setUpdateURL(value)
                 }
             }
         }
@@ -466,6 +503,7 @@ struct ConfigCommand: ParsableCommand {
                 case .gptk: try launcher.setGPTKPath(nil)
                 case .defaultRuntime: try launcher.setDefaultRuntime(nil)
                 case .defaultBottle: try launcher.setDefaultBottle(nil)
+                case .updateURL: try launcher.setUpdateURL(nil)
                 }
             }
         }
@@ -482,6 +520,41 @@ struct Doctor: ParsableCommand {
         let checks = MGCore.Doctor(paths: Context.paths).run()
         print(json ? MGCore.Doctor.json(checks) : MGCore.Doctor.render(checks), terminator: "")
         if checks.contains(where: { $0.status == .error }) { throw ExitCode(1) }
+    }
+}
+
+// MARK: self-update
+
+struct SelfUpdate: ParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "self-update",
+        abstract: "Replace this mgx with the latest release's.",
+        discussion: """
+        Downloads mgx-<version>-macos-arm64.tar.gz from the latest release (or MG_UPDATE_URL), checks its
+        SHA-256, checks that the new binary runs and reports that version, then renames it over this one
+        (atomic: a failed update leaves the old mgx). The app updates itself with Check for Updates….
+        """)
+    @Flag(help: "Only report whether an update is available.") var check = false
+    @Flag(help: "Install even if this version is the same or newer.") var force = false
+
+    func run() throws {
+        try guarded {
+            var updater = try Updater.standard(paths: Context.paths)
+            Context.note("checking \(updater.source)")
+            let m = try updater.fetchManifest()
+            guard force || updater.isNewer(m) else {
+                print("mgx \(MG.version) is up to date (latest release: \(m.version))")
+                return
+            }
+            if check {
+                print("mgx \(m.version) is available (this is \(MG.version)); run `mgx self-update`")
+                return
+            }
+            guard let exe = Bundle.main.executableURL else { throw MGError.update("cannot tell where this mgx is installed") }
+            updater.download = { try Downloader.download($0, to: $1) }
+            try updater.installCLI(m, replacing: exe, log: { Context.note($0) })
+            print("mgx \(m.version) installed (was \(MG.version))")
+        }
     }
 }
 
