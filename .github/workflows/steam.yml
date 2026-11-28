@@ -1,0 +1,245 @@
+name: Steam probe
+
+# Installs the real Steam client with mgx (`SteamSetup.exe /S`, as `mgx steam install` does) and the
+# latest Wine / DXMT / DXVK builds, lets it update itself (~575 MB in two rounds on the first start), starts it again
+# and records what happens: crashes (winedbg in auto mode), steamwebhelper (Steam's Chromium UI)
+# restarts, DXMT's "cross-process swapchain" errors, which processes are still alive, and screenshots.
+# No account or login is involved: the client is expected to reach its login window, and the job
+# summary says how much of that window is not black (it is all black so far, see the matrix).
+# A diagnostic, not a gate: a crashing client is reported in the job summary, not as a failure.
+# It depends on Valve's servers, so it only runs by hand or when this file changes.
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - .github/workflows/steam.yml
+      - .github/scripts/steam-probe.sh
+      - .github/scripts/windows.swift
+
+permissions:
+  contents: read
+
+concurrency:
+  group: steam-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  probe:
+    name: Steam (${{ matrix.name }})
+    runs-on: macos-15
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      actions: read # download the artifacts of other workflow runs
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # args: steam.exe switches (dxmt and wined3d: what `mgx steam run` passes, Store.steam.clientArguments).
+          # env: extra bottle environment. Results so far (PR #20): the login window opens on screen but
+          # stays black on both backends with every switch Steam knows (the "CEF switches" step lists
+          # them). Steam ignores -cef-in-process-gpu, -cef-single-process and -cef-disable-d3d11, so
+          # Chromium's GPU process draws into the browser's window, which winemac.drv does not show.
+          # -cef-disable-gpu-compositing (and -cef-disable-gpu) make Steam skip the GPU attempt; without
+          # them DXMT logs "cross-process swapchain not supported yet" and Steam turns GPU off itself after
+          # ~45 s. Also tried, no change: WINE_SIMULATE_WRITECOPY=1 (no crashes without it either),
+          # -cef-disable-sandbox -no-cef-sandbox, -cef-disable-occlusion, -cef-force-opaque-backgrounds,
+          # -cef-force-browser-underlays, -cef-use-vulkan. No crashes in any variant. In 4 of 20 runs (both
+          # backends) the updater hung at "Cleaning up..." / "launching Steam..."; the next start was fine.
+          - { name: dxmt, backend: dxmt, args: "-cef-disable-gpu-compositing", env: "" }
+          - { name: wined3d, backend: wined3d, args: "-cef-disable-gpu-compositing", env: "" }
+          - { name: dxmt-no-switches, backend: dxmt, args: "", env: "" }
+    defaults:
+      run:
+        shell: bash # -eo pipefail
+    env:
+      BACKEND: ${{ matrix.backend }}
+      VARIANT_ENV: ${{ matrix.env }}
+      VARIANT: ${{ matrix.name }}
+      CLIENT_ARGS: ${{ matrix.args }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up paths
+        run: |
+          {
+            echo "MG_HOME=$RUNNER_TEMP/mg"
+            echo "MGX=$GITHUB_WORKSPACE/launcher/.build/release/mgx"
+            echo "SHOTS=$RUNNER_TEMP/screenshots"
+            echo "PROBE=$RUNNER_TEMP/probe"
+            echo "WINLIST=$RUNNER_TEMP/windows"
+            echo "STEAM_DIR=$RUNNER_TEMP/mg/bottles/st/drive_c/Program Files (x86)/Steam"
+          } >> "$GITHUB_ENV"
+
+      - name: Ensure Rosetta 2
+        run: arch -x86_64 /usr/bin/true || sudo softwareupdate --install-rosetta --agree-to-license
+
+      - name: Cache SwiftPM
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: launcher/.build
+          key: spm-${{ runner.os }}-${{ hashFiles('launcher/Package.resolved') }}
+
+      - name: Build mgx
+        working-directory: launcher
+        run: |
+          swift build -c release
+          swiftc -O ../.github/scripts/windows.swift -o "$WINLIST"
+
+      - name: Download the latest Wine, DXMT and DXVK artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          wine_run=$(gh run list --repo "$REPO" --workflow build-wine.yml --status success --limit 1 --json databaseId --jq '.[0].databaseId // empty')
+          gfx_run=$(gh run list --repo "$REPO" --workflow build-graphics.yml --status success --limit 1 --json databaseId --jq '.[0].databaseId // empty')
+          [[ -n "$wine_run" && -n "$gfx_run" ]] || { echo "::error::need a successful Build Wine and Build graphics layers run"; exit 1; }
+          echo "Wine from run $wine_run, DXMT/DXVK from run $gfx_run"
+          gh run download "$wine_run" --repo "$REPO" --pattern 'wine-crossover-*' --dir "$RUNNER_TEMP/wine-artifact"
+          gh run download "$gfx_run" --repo "$REPO" --pattern 'dxmt-*' --pattern 'dxvk-macos-*' --dir "$RUNNER_TEMP/gfx-artifact"
+          echo "WINE_RUN=$wine_run" >> "$GITHUB_ENV"
+
+      - name: Install runtime and create the bottle
+        run: |
+          $MGX runtime install "$RUNNER_TEMP/wine-artifact"
+          $MGX runtime install "$RUNNER_TEMP/gfx-artifact"
+          $MGX bottle create st --backend "$BACKEND"
+          if [[ -n "$VARIANT_ENV" ]]; then $MGX bottle set st --env "$VARIANT_ENV"; fi
+          # Crashes print a backtrace into the log instead of opening the crash dialog.
+          $MGX run --bottle st --backend wined3d reg.exe add 'HKCU\Software\Wine\WineDbg' /v ShowCrashDialog /t REG_DWORD /d 0 /f
+          $MGX doctor || true
+
+      - name: Install Steam
+        run: |
+          mkdir -p "$SHOTS" "$PROBE"
+          # Exactly `mgx steam install`: downloads SteamSetup.exe and runs it with /S (silent) and wined3d.
+          $MGX steam install --bottle st > "$PROBE/install.out" 2>&1 &
+          pid=$!
+          for i in $(seq 1 30); do
+            kill -0 "$pid" 2>/dev/null || break
+            if (( i % 3 == 0 )); then screencapture -x "$SHOTS/install-$((i * 10))s.png" || true; fi
+            sleep 10
+          done
+          if kill -0 "$pid" 2>/dev/null; then
+            screencapture -x "$SHOTS/install-timeout.png" || true
+            echo "::warning::the silent installer was still running after 5 minutes"
+            kill "$pid" 2>/dev/null || true
+          fi
+          code=0; wait "$pid" || code=$?
+          echo "installer exit code: $code"
+          cat "$PROBE/install.out" || true
+          pgrep -fl 'Steam' || true
+          $MGX bottle stop st || true
+          ls -la "$STEAM_DIR" || true
+          installed=false
+          [[ -f "$STEAM_DIR/steam.exe" ]] && installed=true
+          echo "INSTALLED=$installed" >> "$GITHUB_ENV"
+          $installed || { echo "::error::steam.exe was not installed"; exit 1; }
+
+      - name: First start (self-update)
+        run: |
+          # steam.exe downloads and unpacks the client, restarts itself and then starts steamwebhelper.exe
+          # (the Chromium UI). Up to 20 min for that, then 2 min more for the login window.
+          . "$GITHUB_WORKSPACE/.github/scripts/steam-probe.sh"
+          start_steam update
+          webhelper=false
+          for i in $(seq 1 120); do
+            sleep 10
+            sample update
+            if (( i % 3 == 0 )); then shot update "update-$((i * 10))s"; fi
+            if pgrep -f 'steamwebhelper.exe' > /dev/null; then webhelper=true; break; fi
+          done
+          echo "UPDATE_WEBHELPER=$webhelper" >> "$GITHUB_ENV"
+          echo "UPDATE_SECONDS=$((i * 10))" >> "$GITHUB_ENV"
+          if $webhelper; then
+            for j in $(seq 1 12); do sleep 10; sample update; shot update "update-webhelper-$((j * 10))s"; done
+          else
+            echo "::warning::steamwebhelper.exe did not start within 20 minutes"
+          fi
+          stop_steam update
+          du -sh "$STEAM_DIR" || true
+          ls -la "$STEAM_DIR" || true
+
+      - name: Steam's CEF switches (diagnostic)
+        run: |
+          # Which -cef-* switches the client knows, and which Chromium switches it passes on.
+          python3 - "$STEAM_DIR" <<'PY'
+          import os, re, sys, collections
+          found = collections.defaultdict(set)
+          pats = [re.compile(rb'-cef-[a-z0-9-]{3,60}'), re.compile(rb'--?(?:in-process-gpu|single-process|use-angle|use-gl|disable-features|enable-features)[a-z0-9=,-]{0,60}')]
+          for root, _, files in os.walk(sys.argv[1]):
+              for f in files:
+                  if not f.lower().endswith(('.exe', '.dll')): continue
+                  p = os.path.join(root, f)
+                  try: data = open(p, 'rb').read()
+                  except OSError: continue
+                  for d in (data, data.replace(b'\x00', b'')):
+                      for pat in pats:
+                          for m in pat.findall(d): found[m.decode('ascii', 'replace')].add(os.path.relpath(p, sys.argv[1]))
+          for k in sorted(found): print(k, '\t', ', '.join(sorted(found[k]))[:200])
+          PY
+
+      - name: Start Steam
+        run: |
+          # The second start is what users get every time: no download, straight to the login window.
+          . "$GITHUB_WORKSPACE/.github/scripts/steam-probe.sh"
+          start_steam client
+          for i in $(seq 1 36); do
+            sleep 5
+            sample client
+            if (( i % 3 == 0 )); then shot client "client-$((i * 5))s"; fi
+          done
+          stop_steam client
+
+      - name: Summary
+        if: always()
+        run: |
+          . "$GITHUB_WORKSPACE/.github/scripts/steam-probe.sh"
+          {
+            echo "## Steam: $VARIANT"
+            echo "- backend: \`$BACKEND\`, extra env: \`${VARIANT_ENV:-none}\`, Wine from Build Wine run $WINE_RUN"
+            echo "- client: \`steam.exe ${CLIENT_ARGS}\`"
+            echo "- installed: ${INSTALLED:-unknown}; first start reached steamwebhelper: ${UPDATE_WEBHELPER:-unknown} after ${UPDATE_SECONDS:-?} s"
+            echo
+            echo "| | first start (update) | second start (180 s) |"
+            echo "|---|---|---|"
+            echo "| crashes (Unhandled exception) | $(crashes update) | $(crashes client) |"
+            echo "| steamwebhelper crashes (in its process) | $(webhelper_crashes update) | $(webhelper_crashes client) |"
+            echo "| steamwebhelper main processes started | $(webhelper_starts update) | $(webhelper_starts client) |"
+            echo "| \"cross-process swapchain\" (DXMT) | $(swapchain update) | $(swapchain client) |"
+            echo "| steam.exe / steamwebhelper processes alive at the end | $(alive update) | $(alive client) |"
+            echo "| \"Sign in to Steam\" window in the last screenshot (not black) | $(lit update) | $(lit client) |"
+            for stage in client update; do
+              f=$(logpath "$stage")
+              [[ -f "$f" ]] || continue
+              if grep -q 'Unhandled exception' "$f"; then
+                echo
+                echo "First crash in the $stage log (\`$(basename "$f")\`):"
+                echo '```'
+                grep -m1 -A40 'Unhandled exception' "$f" | grep -v '^\s*VK_\|mvk-info' | head -n 45
+                echo '```'
+                break
+              fi
+            done
+            echo
+            echo "steamwebhelper lines in Steam's logs:"
+            echo '```'
+            grep -rih 'webhelper' "$STEAM_DIR/logs" 2>/dev/null | grep -iv 'cef_log' | tail -n 25 || true
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+          mkdir -p "$PROBE/steam-logs"
+          cp -R "$STEAM_DIR/logs/." "$PROBE/steam-logs/" 2>/dev/null || true
+
+      - name: Upload logs and screenshots
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: steam-${{ matrix.name }}
+          path: |
+            ${{ runner.temp }}/mg/logs
+            ${{ runner.temp }}/screenshots
+            ${{ runner.temp }}/probe
+          if-no-files-found: ignore

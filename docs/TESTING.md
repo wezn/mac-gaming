@@ -177,6 +177,7 @@ compile, visual glitches.
 `mgx steam install --bottle cs2 --backend dxmt` (d3dmetal without DXMT). Runs `SteamSetup.exe /S`.
 
 **Success:** no window, the command finishes, and `C:\Program Files (x86)\Steam\steam.exe` exists.
+The Steam probe workflow (`.github/workflows/steam.yml`) does this on a CI Mac on every change to it.
 
 ### 11. CS2 on Steam (throwaway account only)
 
@@ -184,8 +185,16 @@ compile, visual glitches.
 ([docs/PLAN.md](PLAN.md)). Use a throwaway account, and play offline against bots, never matchmaking.
 The script asks you to type `throwaway` before it starts Steam.
 
-`mgx steam run --bottle cs2` starts Steam with `-cef-disable-gpu-compositing -cef-in-process-gpu`.
-**Success:** the Steam window renders (store and library visible), it updates itself, CS2 installs and
+`mgx steam run --bottle cs2` starts Steam with `-cef-disable-gpu-compositing`. On the first start Steam
+downloads ~575 MB (in two rounds) and restarts itself (a small "Updating Steam" window); about 1 time in 5 on CI that window
+stopped at "Cleaning up..." or "launching Steam..." for good: quit it (`mgx bottle stop cs2`) and run again.
+
+**Expected today:** the "Sign in to Steam" window opens but is **black**. The Steam probe workflow found
+this on DXMT and wined3d with every switch Steam still knows: Steam ignores `-cef-in-process-gpu`, so
+Chromium's GPU process draws into the browser process's window, and Wine's macOS driver does not show
+drawing into another process's window. Report whether it is black on your Mac too (a screenshot), and
+whether anything changes after Steam > Settings > Interface > GPU accelerated rendering (if you can reach
+it). **Success** (once that is fixed): the window renders, it updates itself, CS2 installs and
 reaches the menu, an offline bot match runs. Also worth one try each: CS2's `-vulkan` launch option
 (Vulkan through MoltenVK instead of D3D11), and the bottle on `d3dmetal` instead of `dxmt`.
 
@@ -199,7 +208,7 @@ to look, and the report collects what is needed to fix them.
 | The GPTK lib folder looks like `redist/lib/{external/D3DMetal.framework, external/libd3dshared.dylib, wine/x86_64-windows/*.dll, wine/x86_64-unix/*.so}`. mgx also accepts the volume root, `redist`, `lib`, an app bundle's `Contents/Resources/wine/lib` and `wine/lib` | `GPTKInstall.resolve` in `launcher/Sources/MGCore/BackendFiles.swift` | `mgx config set gptk` accepts or rejects your folder; the report has the folder listing (4 levels deep) and the D3DMetal.framework version from its `Info.plist`, so a different layout (GPTK 3.x?) can be added |
 | DXMT, merged into `wine-dxmt/` and loaded as builtin, renders real games (CI only creates a device on a virtual GPU) | `BackendFiles.ensureDXMTOverlay` | Steps 4 and 8 |
 | D3DMetal works when the GPTK `lib` folder is merged over Wine's `lib/` (`wine-d3dmetal/`) and `lib/external` is on `DYLD_FALLBACK_LIBRARY_PATH` | `ensureD3DMetalOverlay` | Steps 5 and 7 |
-| Steam's installer is silent with `/S`, and the client needs `-cef-disable-gpu-compositing -cef-in-process-gpu` | `Store.steam` in `launcher/Sources/MGCore/Installers.swift` | Steps 10 and 11. The URL itself is fine: `https://cdn.cloudflare.steamstatic.com/client/installer/SteamSetup.exe` returned a 2.3 MB PE on 2026-11-27 |
+| Steam's login window stays black on a real Mac as on CI (installer `/S` and the self-update work there) | `Store.steam` in `launcher/Sources/MGCore/Installers.swift` | Step 11. The Steam probe workflow checks install, update and the login window on a CI Mac |
 | Battle.net's installer URL and the client path `C:\Program Files (x86)\Battle.net\Battle.net Launcher.exe` | `Store.battlenet` | Step 6. The URL (`https://www.battle.net/download/getInstallerForGame?os=win&gameProgram=BATTLENET_APP&version=Live`) returned a 4.7 MB PE on 2026-11-27; the install path is unverified |
 
 ## What to send back

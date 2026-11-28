@@ -585,11 +585,11 @@ if step "Steam install (bottle 'cs2')" \
 fi
 
 if [[ -f "$MG_HOME/bottles/cs2/drive_c/Program Files (x86)/Steam/steam.exe" ]] && step "Steam client and CS2 (THROWAWAY ACCOUNT ONLY)" \
-  "Starts Steam with -cef-disable-gpu-compositing -cef-in-process-gpu. VAC ban risk under Wine is unknown: sign in with a throwaway account only (docs/PLAN.md). Play offline vs bots only; never matchmaking."; then
+  "Starts Steam with -cef-disable-gpu-compositing. On a CI Mac its login window opens but stays black (Steam probe workflow); say whether it does here too. VAC ban risk under Wine is unknown: sign in with a throwaway account only (docs/PLAN.md). Play offline vs bots only; never matchmaking."; then
   read -r -p "Type 'throwaway' to confirm you are using a throwaway Steam account: " confirm || confirm=""
   if [[ "$confirm" == throwaway ]]; then
     run "$MG" steam run --bottle cs2 || true
-    outcome "Did the Steam window render (store/library visible), and did CS2 reach the menu / an offline bot match?"
+    outcome "Did the Steam login window render or stay black? If it rendered: store/library visible, and did CS2 reach the menu / an offline bot match?"
   else
     record "SKIPPED (no throwaway account confirmation)"
   fi
