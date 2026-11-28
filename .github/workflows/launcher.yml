@@ -57,6 +57,56 @@ jobs:
           .build/release/mgx report -o "$RUNNER_TEMP/report.tar.gz"
           tar -tzf "$RUNNER_TEMP/report.tar.gz" | grep -q '/doctor.json$'
 
+      # `mgx runtime update` and `mgx self-update` against a fake release served from 127.0.0.1
+      # (Scripts/make_fake_release.sh), the same manifest layout the release workflow publishes.
+      - name: Updates end to end (fake release)
+        env:
+          MG_HOME: ${{ runner.temp }}/mg-update
+        run: |
+          set -euo pipefail
+          rel="$RUNNER_TEMP/fake-release"
+          Scripts/make_fake_release.sh "$rel" 9.9.9
+          python3 -m http.server --bind 127.0.0.1 8765 --directory "$rel" > "$RUNNER_TEMP/http.log" 2>&1 &
+          srv=$!
+          trap 'kill $srv 2>/dev/null || true' EXIT
+          for _ in $(seq 1 30); do curl -fsS -o /dev/null http://127.0.0.1:8765/manifest.json && break; sleep 0.5; done
+          export MG_UPDATE_URL=http://127.0.0.1:8765/
+          mg=.build/release/mgx
+
+          $mg runtime update --check | tee "$RUNNER_TEMP/check.txt"
+          grep -q "available: wine 26.3.0" "$RUNNER_TEMP/check.txt"
+          $mg runtime update
+          $mg runtime list | tee "$RUNNER_TEMP/list.txt"
+          grep -q "crossover-26.3.0-wow64.*dxmt 0.80" "$RUNNER_TEMP/list.txt"
+          # Already installed at the release's versions: nothing is downloaded again.
+          $mg runtime update | tee "$RUNNER_TEMP/again.txt"
+          grep -q "is up to date" "$RUNNER_TEMP/again.txt"
+          gets=$(grep -c "GET /wine-crossover" "$RUNNER_TEMP/http.log" || true)
+          [[ "$gets" == 1 ]] || { echo "::error::expected the Wine archive to be downloaded once, got $gets"; cat "$RUNNER_TEMP/http.log"; exit 1; }
+          # The doctor reads the cached manifest, offline.
+          doctor=$($mg doctor || true)
+          echo "$doctor"
+          grep -q "Mac Gaming 9.9.9 is available" <<<"$doctor"
+
+          # A file that does not match the manifest's SHA-256 is refused and nothing is installed.
+          bad="$RUNNER_TEMP/bad-release"
+          cp -R "$rel" "$bad"
+          echo tampered >> "$bad/dxmt-0.80.tar.xz"
+          code=0
+          out=$(MG_HOME="$RUNNER_TEMP/mg-bad" MG_UPDATE_URL="$bad" $mg runtime update 2>&1) || code=$?
+          echo "$out"
+          [[ $code == 1 ]] || { echo "::error::expected a tampered release to fail, exit code $code"; exit 1; }
+          grep -q "failed verification" <<<"$out"
+          [[ -z "$(ls "$RUNNER_TEMP/mg-bad/runtimes" 2>/dev/null | grep -v '^\.')" ]] || { echo "::error::a runtime was installed from a tampered release"; exit 1; }
+
+          # self-update replaces a copy of mgx (the fake release's "mgx" prints 9.9.9).
+          mkdir -p "$RUNNER_TEMP/self-update"
+          cp "$mg" "$RUNNER_TEMP/self-update/mgx"
+          "$RUNNER_TEMP/self-update/mgx" self-update --check | grep -q "9.9.9 is available"
+          "$RUNNER_TEMP/self-update/mgx" self-update
+          [[ "$("$RUNNER_TEMP/self-update/mgx" --version)" == 9.9.9 ]] || { echo "::error::mgx self-update did not replace the binary"; exit 1; }
+          [[ "$(ls -A "$RUNNER_TEMP/self-update")" == mgx ]] || { echo "::error::self-update left files behind"; exit 1; }
+
       # A ready-to-run binary for testers, so they don't need Xcode. It is unsigned (only the
       # linker's ad-hoc signature): see docs/TESTING.md for the Gatekeeper step. Packed as a
       # tarball because artifact zips drop the executable bit.
@@ -181,6 +231,62 @@ jobs:
           name: MacGaming-app
           path: launcher/build/MacGaming.zip
           if-no-files-found: error
+
+      # The app updates itself from a fake release (a copy of this build with version 9.9.9) served from
+      # 127.0.0.1: check, download, verify (SHA-256 + codesign), swap the bundle, relaunch.
+      - name: App self-update end to end (fake release)
+        run: |
+          set -euo pipefail
+          work="$RUNNER_TEMP/app-update"
+          shots="$RUNNER_TEMP/screenshots"
+          installed="$work/Applications/MacGaming.app"
+          mkdir -p "$work/Applications" "$shots"
+          ditto launcher/build/MacGaming.app "$installed"
+          launcher/Scripts/make_fake_release.sh "$work/release" 9.9.9 launcher/build/MacGaming.app
+          python3 -m http.server --bind 127.0.0.1 8766 --directory "$work/release" > "$work/http.log" 2>&1 &
+          srv=$!
+          trap 'kill $srv 2>/dev/null || true; pkill -f "$installed/Contents/MacOS/MacGaming" || true' EXIT
+          for _ in $(seq 1 30); do curl -fsS -o /dev/null http://127.0.0.1:8766/manifest.json && break; sleep 0.5; done
+          export MG_UPDATE_URL=http://127.0.0.1:8766/ MG_HOME="$work/home"
+          app="$installed/Contents/MacOS/MacGaming"
+
+          shoot() {
+            local name=$1; shift
+            "$app" "$@" > "$work/$name.log" 2>&1 &
+            local pid=$!
+            sleep 8
+            kill -0 "$pid" || { echo "::error::MacGaming exited early ($name)"; cat "$work/$name.log"; exit 1; }
+            screencapture -x "$shots/$name.png" || echo "::warning::screencapture failed for $name"
+            kill "$pid"; wait "$pid" 2>/dev/null || true
+          }
+          # First run, no runtime: the Runtimes page offers the release's runtime.
+          shoot runtime-onboarding -MGInitialSection runtimes -MGAutomaticUpdateChecks NO
+          grep -q '"version" : "9.9.9"' "$MG_HOME/cache/updates/latest.json"
+          shoot update-available -MGInitialSection runtimes -MGCheckForUpdatesOnLaunch YES
+
+          "$app" -MGCheckForUpdatesOnLaunch YES -MGAutoInstallUpdate YES > "$work/install.log" 2>&1 &
+          pid=$!
+          v=""
+          for _ in $(seq 1 90); do
+            v=$(plutil -extract CFBundleShortVersionString raw "$installed/Contents/Info.plist" 2>/dev/null || true)
+            if [[ "$v" == 9.9.9 ]] && ! kill -0 "$pid" 2>/dev/null; then break; fi
+            sleep 1
+          done
+          cat "$work/install.log"
+          [[ "$v" == 9.9.9 ]] || { echo "::error::the app did not update itself (version $v)"; exit 1; }
+          ! kill -0 "$pid" 2>/dev/null || { echo "::error::the old app did not quit after updating"; exit 1; }
+          codesign --verify --deep --strict "$installed"
+          [[ "$(ls -A "$work/Applications")" == MacGaming.app ]] || { echo "::error::the update left files behind"; ls -la "$work/Applications"; exit 1; }
+          relaunched=""
+          for _ in $(seq 1 30); do
+            relaunched=$(pgrep -f "$installed/Contents/MacOS/MacGaming" || true)
+            [[ -n "$relaunched" ]] && break
+            sleep 1
+          done
+          [[ -n "$relaunched" ]] || { echo "::error::the updated app was not relaunched"; exit 1; }
+          echo "relaunched as pid $relaunched"
+          sleep 5
+          screencapture -x "$shots/after-update.png" || true
 
       - name: Upload screenshots
         if: always()

@@ -50,6 +50,8 @@ struct SettingsView: View {
                 }
             }
 
+            UpdateSettingsSection()
+
             Section {
                 LabeledContent("Data folder") {
                     HStack {
