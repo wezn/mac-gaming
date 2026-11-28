@@ -420,7 +420,7 @@ final class UpdatesTests: XCTestCase {
         return out
     }
 
-    private func version(of app: URL) -> String? {
+    private func bundleVersion(of app: URL) -> String? {
         (NSDictionary(contentsOf: app.appendingPathComponent("Contents/Info.plist")) as? [String: Any])?["CFBundleShortVersionString"] as? String
     }
 
@@ -433,7 +433,7 @@ final class UpdatesTests: XCTestCase {
         let u = Updater(paths: sb.paths, source: try release(sb, [z]))
         try u.installApp(ReleaseManifest(version: "0.2.0", app: try asset(z)), replacing: installed,
                          bundleIdentifier: "io.github.wezn.mac-gaming")
-        XCTAssertEqual(version(of: installed), "0.2.0")
+        XCTAssertEqual(bundleVersion(of: installed), "0.2.0")
         XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: installedDir.path), ["MacGaming.app"])
         XCTAssertEqual(try Subprocess.run(URL(fileURLWithPath: "/usr/bin/codesign"), ["--verify", "--deep", "--strict", installed.path],
                                           environment: [:], output: .null), 0)
@@ -451,7 +451,7 @@ final class UpdatesTests: XCTestCase {
                                                   bundleIdentifier: "io.github.wezn.mac-gaming")) { e in
                 XCTAssertTrue("\(e)".contains(needle), "\(e)")
             }
-            XCTAssertEqual(version(of: installed), "0.1.0", "the installed app is untouched")
+            XCTAssertEqual(bundleVersion(of: installed), "0.1.0", "the installed app is untouched")
         }
         let build = { sb.root.appendingPathComponent("build-\(UUID().uuidString)", isDirectory: true) }
         try attempt(try makeApp(sb, at: build(), version: "0.2.0"), release: "0.2.0", sha: String(repeating: "0", count: 64), needle: "failed verification")
