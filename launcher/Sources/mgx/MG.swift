@@ -11,7 +11,7 @@ struct MG: ParsableCommand {
         abstract: "Run Windows games on Apple Silicon Macs.",
         version: MG.version,
         subcommands: [Run.self, BottleCommand.self, RuntimeCommand.self, SteamCommand.self, BattlenetCommand.self,
-                      ConfigCommand.self, Detect.self, Doctor.self, Logs.self, Report.self, SelfUpdate.self]
+                      ConfigCommand.self, Detect.self, Doctor.self, Logs.self, Report.self, SelfUpdate.self, Licenses.self]
     )
     static let version = MGVersion.string
 }

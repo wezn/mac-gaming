@@ -35,6 +35,8 @@ struct MacGamingApp: App {
             SettingsView()
                 .environmentObject(model)
         }
+
+        AcknowledgementsWindow()
     }
 }
 
